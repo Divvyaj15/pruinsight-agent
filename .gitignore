@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.log
+_test_report.pdf
+*.pdf
+!docs/**/*.pdf
+
+# Private learning notes (do not commit)
+MY_PROJECT_GUIDE.md
+PRIVATE_*.md
+NOTES_PRIVATE.md
