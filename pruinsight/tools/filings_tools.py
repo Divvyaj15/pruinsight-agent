@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 import io
-import os
 import re
-from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from pypdf import PdfReader
-from tavily import TavilyClient
 
 from pruinsight.rag.store import Chunk, get_filings_store
+from pruinsight.tools.search_providers import search_as_dicts
 
 load_dotenv()
-
-_tavily: Optional[TavilyClient] = None
 
 # Prefer primary-market / regulator domains when ranking results
 _PREFERRED_DOMAINS = (
@@ -42,16 +38,6 @@ _SESSION.headers.update(
         "Accept": "application/pdf,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 )
-
-
-def _get_tavily() -> TavilyClient:
-    global _tavily
-    if _tavily is None:
-        key = os.getenv("TAVILY_API_KEY")
-        if not key:
-            raise ValueError("TAVILY_API_KEY is not set")
-        _tavily = TavilyClient(api_key=key)
-    return _tavily
 
 
 def _domain_boost(url: str) -> int:
@@ -162,7 +148,6 @@ def search_company_filings(query: str) -> str:
     Pass company name and/or NSE symbol, e.g. 'HDFC Bank HDFCBANK annual report'.
     """
     try:
-        client = _get_tavily()
         # Two complementary searches improve hit rate on exchange domains
         queries = [
             f"{query} annual report OR quarterly results PDF India",
@@ -170,12 +155,12 @@ def search_company_filings(query: str) -> str:
         ]
         seen: set[str] = set()
         ranked: list[tuple[int, dict]] = []
+        providers_used: list[str] = []
         for q in queries:
-            try:
-                results = client.search(q, max_results=6, search_depth="advanced")
-            except Exception:
-                results = client.search(q, max_results=6)
-            for r in results.get("results") or []:
+            items, provider, _errs = search_as_dicts(q, max_results=6, mode="web")
+            if provider:
+                providers_used.append(provider)
+            for r in items:
                 url = (r.get("url") or "").strip()
                 if not url or url in seen:
                     continue
@@ -184,17 +169,23 @@ def search_company_filings(query: str) -> str:
 
         ranked.sort(key=lambda x: x[0], reverse=True)
         if not ranked:
-            return "No filing-related search results found."
+            return "No filing-related search results found (Tavily/Serper/DuckDuckGo)."
 
-        lines = ["Filing / primary-source search results (ranked):"]
+        lines = [
+            "Filing / primary-source search results (ranked):",
+            f"Search providers used: {', '.join(dict.fromkeys(providers_used)) or 'n/a'}",
+            "",
+        ]
         for i, (boost, r) in enumerate(ranked[:10], 1):
             title = r.get("title") or "Untitled"
             url = r.get("url") or ""
             content = (r.get("content") or "")[:280]
             pdf_flag = " [PDF likely]" if ".pdf" in url.lower() else ""
+            via = r.get("provider") or ""
             lines.append(
                 f"{i}. {title}{pdf_flag} (score={boost})\n"
                 f"   {content}\n   URL: {url}"
+                + (f"\n   via: {via}" if via else "")
             )
         lines.append(
             "\nTip: Call ingest_filing_pdf on the most relevant PDF URLs, "

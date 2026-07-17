@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
-from tavily import TavilyClient
 
-from pruinsight.rag.store import Chunk, get_factsheet_store
+from pruinsight.rag.store import get_factsheet_store
 from pruinsight.tools.filings_tools import download_pdf, extract_pdf_bytes
+from pruinsight.tools.search_providers import search_as_dicts
 
 load_dotenv()
 
@@ -30,8 +28,6 @@ _SESSION.headers.update(
         )
     }
 )
-
-_tavily: Optional[TavilyClient] = None
 
 # Cache NAV universe in memory (refreshed periodically)
 _NAV_CACHE: list["SchemeRow"] = []
@@ -50,16 +46,6 @@ class SchemeRow:
     date: str
     category: str
     amc: str
-
-
-def _get_tavily() -> TavilyClient:
-    global _tavily
-    if _tavily is None:
-        key = os.getenv("TAVILY_API_KEY")
-        if not key:
-            raise ValueError("TAVILY_API_KEY is not set")
-        _tavily = TavilyClient(api_key=key)
-    return _tavily
 
 
 def _parse_nav_text(text: str) -> list[SchemeRow]:
@@ -351,19 +337,18 @@ def search_fund_factsheet(query: str) -> str:
         q = (query or "").strip()
         if not q:
             return "Provide a fund/AMC name."
-        client = _get_tavily()
         searches = [
             f"{q} mutual fund factsheet PDF",
             f"{q} scheme factsheet site:.in filetype:pdf",
         ]
         seen: set[str] = set()
         ranked: list[tuple[int, dict]] = []
+        providers_used: list[str] = []
         for sq in searches:
-            try:
-                results = client.search(sq, max_results=5, search_depth="basic")
-            except Exception:
-                results = client.search(sq, max_results=5)
-            for r in results.get("results") or []:
+            items, provider, _errs = search_as_dicts(sq, max_results=5, mode="web")
+            if provider:
+                providers_used.append(provider)
+            for r in items:
                 url = (r.get("url") or "").strip()
                 if not url or url in seen:
                     continue
@@ -395,8 +380,12 @@ def search_fund_factsheet(query: str) -> str:
                 ranked.append((score, r))
         ranked.sort(key=lambda x: x[0], reverse=True)
         if not ranked:
-            return "No factsheet results found."
-        lines = ["Fund factsheet / document search results:"]
+            return "No factsheet results found (Tavily/Serper/DuckDuckGo)."
+        lines = [
+            "Fund factsheet / document search results:",
+            f"Search providers: {', '.join(dict.fromkeys(providers_used)) or 'n/a'}",
+            "",
+        ]
         for i, (score, r) in enumerate(ranked[:8], 1):
             title = r.get("title") or "Untitled"
             url = r.get("url") or ""

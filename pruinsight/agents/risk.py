@@ -39,14 +39,21 @@ Symbols: {', '.join(symbols) or 'N/A'}
 === Filings / primary sources ===
 {state.get('filings_context') or 'N/A'}
 
+=== Earnings transcripts / management commentary ===
+{state.get('transcripts_context') or 'N/A'}
+
 === Fundamentals ===
 {state.get('fundamentals') or 'N/A'}
 
 === Mutual fund / AMFI context ===
 {state.get('mf_context') or 'N/A'}
 
+=== Macro / RBI / global rates ===
+{state.get('macro_context') or 'N/A'}
+
 If symbols are present, you may call get_price_history (period 1y) and get_index_snapshot (INDIAVIX and NIFTY).
 Weight risks disclosed in filings highly. Use MF context for concentration / category / mandate risks.
+Use macro for rates, USDINR, oil, and risk-regime sensitivity.
 Produce a risk assessment brief for MF portfolio managers.
 """
 

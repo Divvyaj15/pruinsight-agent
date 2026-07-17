@@ -2,7 +2,7 @@
 PruInsight — multi-agent equity research (LangGraph + Groq).
 
 Pipeline:
-  Researcher → Filings → Fundamentals → MF Context (AMFI) → Risk → Synthesizer
+  Researcher → Filings → Transcripts → Fundamentals → MF → Macro → Risk → Synthesizer
 """
 
 import argparse
@@ -61,7 +61,7 @@ def main() -> None:
     if args.symbols:
         print(f"Symbols: {', '.join(args.symbols)}")
     print(
-        "Running agents: researcher → filings → fundamentals → mf_context → risk → synthesizer ...\n"
+        "Running agents: researcher → filings → transcripts → fundamentals → mf → macro → risk → synthesizer ...\n"
     )
 
     result = run_research(
@@ -74,10 +74,14 @@ def main() -> None:
         print(result.get("market_research") or "N/A")
         print("\n--- Filings / Primary Sources ---\n")
         print(result.get("filings_context") or "N/A")
+        print("\n--- Earnings Transcripts ---\n")
+        print(result.get("transcripts_context") or "N/A")
         print("\n--- Fundamentals ---\n")
         print(result.get("fundamentals") or "N/A")
         print("\n--- MF / AMFI Context ---\n")
         print(result.get("mf_context") or "N/A")
+        print("\n--- Macro / RBI / Global ---\n")
+        print(result.get("macro_context") or "N/A")
         print("\n--- Risk Assessment ---\n")
         print(result.get("risk_assessment") or "N/A")
         print("\n--- Final Report ---\n")

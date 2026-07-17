@@ -6,49 +6,45 @@ It produces a structured mutual-fund-style research note for Indian (NSE) stocks
 
 > **Educational / demo only.** Not investment advice and not an official ICICI Prudential AMC product.
 
+### Documentation map
+
+| Doc | What’s inside |
+|-----|----------------|
+| **[README.md](./README.md)** (this file) | Setup, run, usage, troubleshooting |
+| **[TECH_STACK_AND_HOW_IT_WORKS.md](./TECH_STACK_AND_HOW_IT_WORKS.md)** | **Full tech stack, architecture, every agent/tool, data flow** |
+| **[DOCKER_LEARNING.md](./DOCKER_LEARNING.md)** | Step-by-step Docker tutorial |
+| `MY_PROJECT_GUIDE.md` | Private notes (gitignored, local only) |
+
 ---
 
 ## What it does
 
-You give PruInsight a research question (and optionally NSE symbols). Four specialized agents run in sequence and hand work to each other:
+You give PruInsight a research question (and optionally NSE symbols). **Eight specialized agents** run in sequence:
 
 ```
 Your query
     │
     ▼
-┌────────────────────┐
-│ 1. Market Researcher │  Web + news search, company headlines, index regime
-└─────────┬──────────┘
-          ▼
-┌────────────────────┐
-│ 2. Filings Analyst   │  SEBI/BSE/NSE/IR PDFs → extract → BM25 RAG
-└─────────┬──────────┘
-          ▼
-┌────────────────────┐
-│ 3. Fundamentals      │  Quote, financials, history, peers, Street targets
-└─────────┬──────────┘
-          ▼
-┌────────────────────┐
-│ 4. MF Context (AMFI) │  Official NAVs + fund factsheet RAG
-└─────────┬──────────┘
-          ▼
-┌────────────────────┐
-│ 5. Risk Assessor     │  Risks + optional vol / India VIX context
-└─────────┬──────────┘
-          ▼
-┌────────────────────┐
-│ 6. Report Synthesizer│  One IC-style note for an MF desk + disclaimer
-└────────────────────┘
+1. Market Researcher   → web/news, headlines, indices
+2. Filings Analyst     → SEBI/BSE/NSE/IR PDFs + BM25 RAG
+3. Transcripts Analyst → earnings call transcripts + BM25 RAG
+4. Fundamentals        → Screener-style ratios, quarterly, peers
+5. MF Context (AMFI)   → NAVs + fund factsheet RAG
+6. Macro Analyst       → RBI + India/global macro (FRED optional)
+7. Risk Assessor       → downside / portfolio risks
+8. Report Synthesizer  → final MF-desk note + disclaimer
 ```
 
 | Agent | What it contributes | Tools used |
 |-------|---------------------|------------|
-| **Market Researcher** | Headlines, catalysts, sector/macro story | `web_search`, `news_search`, `get_company_news`, `get_index_snapshot` |
-| **Filings Analyst** | Primary-source excerpts from PDFs | `search_company_filings`, `ingest_filing_pdf`, `query_filings_rag` |
-| **Fundamentals Analyst** | Metrics, statements, performance, peers | `get_stock_data`, `get_financials`, `get_price_history`, `get_analyst_view`, `get_peer_snapshot` |
-| **MF Context** | AMFI schemes/NAVs + factsheet excerpts | `search_amfi_schemes`, `get_amfi_nav`, `search_related_equity_funds`, factsheet search/ingest/RAG |
-| **Risk Assessor** | Risks, monitoring checklist | `get_price_history`, `get_index_snapshot` (+ prior agent text) |
-| **Report Synthesizer** | Final PruInsight note | LLM only (merges everything) |
+| **Market Researcher** | Headlines, catalysts, sector story | search cascade, company news, indices |
+| **Filings Analyst** | Primary-source PDF excerpts | filings search/ingest/RAG |
+| **Transcripts Analyst** | Management guidance, Q&A themes | transcript search/ingest/RAG |
+| **Fundamentals Analyst** | Screener-style deep metrics | deep_fundamentals pack |
+| **MF Context** | AMFI schemes/NAVs + factsheets | AMFI + factsheet tools |
+| **Macro Analyst** | RBI/MPC + India/global levels | macro dashboard, FRED/Yahoo |
+| **Risk Assessor** | Risks, monitoring checklist | price history, indices (+ prior text) |
+| **Report Synthesizer** | Final PruInsight note | LLM only |
 
 **Typical output sections**
 
@@ -115,6 +111,72 @@ How it works each run:
 
 Source file: `https://portal.amfiindia.com/spages/NAVAll.txt`  
 Code: `pruinsight/tools/amfi_tools.py`, `pruinsight/agents/mf_context.py`
+
+### Macro — RBI + FRED (step 3 enhancement)
+
+| Piece | Source | Notes |
+|-------|--------|--------|
+| India market levels | yfinance | Nifty, Sensex, India VIX, USD/INR |
+| RBI policy narrative | Tavily → rbi.org.in / media | Repo/MPC/inflation context |
+| Global rates/oil/VIX | **FRED** if `FRED_API_KEY` set | Else Yahoo proxies |
+| DBIE | https://dbie.rbi.org.in/ | Linked as official warehouse; not full table scrape |
+
+Optional `.env`:
+
+```env
+FRED_API_KEY=your_free_fred_key
+```
+
+Free key: https://fred.stlouisfed.org/docs/api/api_key.html  
+
+Code: `pruinsight/tools/macro_tools.py`, `pruinsight/agents/macro.py`
+
+### Search fallback cascade (step 4)
+
+All web/news/filing/factsheet/RBI searches go through `pruinsight/tools/search_providers.py`:
+
+```
+Tavily (primary, if TAVILY_API_KEY)
+    → Serper (optional Google SERP, if SERPER_API_KEY)
+        → DuckDuckGo (free, via `ddgs` package — no key)
+```
+
+- Results annotate which provider was used.
+- `GROQ_API_KEY` remains required for the LLM; search can run without Tavily if DuckDuckGo is installed.
+
+Optional `.env`:
+
+```env
+SERPER_API_KEY=your_serper_key   # https://serper.dev/
+```
+
+### Screener-style deep fundamentals (step 5)
+
+Without scraping Screener.in (ToS/fragility), fundamentals now use a **yfinance-backed Screener-style pack**:
+
+| Tool | Content |
+|------|---------|
+| `get_screener_style_snapshot` | One-shot: ratios + quarterly + holders + earnings dates |
+| `get_key_ratios_growth` | Valuation, margins, leverage, YoY growth, FCF, 52w range |
+| `get_quarterly_financials` | Quarterly income / BS / cash flow tables |
+| `get_shareholding_overview` | Major / institutional / MF holders (best-effort) |
+| `get_default_peer_set` | Built-in peer lists for common large-caps + metrics |
+
+Code: `pruinsight/tools/deep_fundamentals.py` — fundamentals agent always loads this pack for in-scope symbols.
+
+### Earnings transcripts (step 6)
+
+| Tool | Role |
+|------|------|
+| `search_earnings_transcripts` | Multi-provider search for concall / earnings transcripts |
+| `ingest_transcript_document` | PDF or HTML → text → transcript BM25 store |
+| `query_transcripts_rag` | Retrieve management guidance / Q&A excerpts |
+| `list_ingested_transcripts` | What was loaded this run |
+
+Pipeline node: **transcripts** (after filings, before fundamentals).  
+Code: `pruinsight/tools/transcripts_tools.py`, `pruinsight/agents/transcripts.py`.
+
+**Caveat:** many full transcripts are paywalled or JS-only; the agent reports gaps honestly.
 
 ---
 
@@ -184,10 +246,10 @@ Below is a practical map for **Indian equity / MF research**. Pick by budget, re
 |------|--------|--------|
 | **1** | **SEBI / BSE / company filings (PDF + RAG)** | **Done** |
 | **2** | **AMFI / fund factsheets** | **Done** |
-| 3 | RBI DBIE / FRED macro | Next |
-| 4 | Serper or DuckDuckGo search fallback | Planned |
-| 5 | Screener / CMIE-style deep fundamentals | Planned |
-| 6 | Earnings transcripts | Planned |
+| **3** | **RBI / FRED macro** | **Done** |
+| **4** | **Serper / DuckDuckGo search fallback** | **Done** |
+| **5** | **Screener-style deep fundamentals** | **Done** |
+| **6** | **Earnings transcripts** | **Done** |
 
 ### How to plug a new source into PruInsight
 
@@ -200,10 +262,39 @@ Below is a practical map for **Indian equity / MF research**. Pick by budget, re
 
 ## Prerequisites
 
-- **Python 3.11+** recommended  
+- **Python 3.11+** recommended (for local non-Docker runs)  
+- **Docker Desktop** (optional, for container deploy — see below)  
 - API keys:
-  - [Groq](https://console.groq.com/) — LLM  
-  - [Tavily](https://tavily.com/) — web / news search  
+  - [Groq](https://console.groq.com/) — LLM (required)  
+  - [Tavily](https://tavily.com/) — web / news / RBI search (required)  
+  - [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) — global macro series (optional)
+
+---
+
+## Deploy with Docker (recommended for “it just runs”)
+
+Full beginner walkthrough: **[DOCKER_LEARNING.md](./DOCKER_LEARNING.md)** (concepts + every command explained).
+
+**Quick start** (Docker Desktop running, `.env` filled in project root):
+
+```bash
+# From project root
+docker compose up --build
+```
+
+Open **http://localhost:8501**
+
+```bash
+docker compose down    # stop
+```
+
+| File | Role |
+|------|------|
+| `Dockerfile` | Image recipe (Python + deps + Streamlit) |
+| `docker-compose.yml` | Ports + `.env` + one-command start |
+| `.dockerignore` | Keeps secrets/junk out of the image |
+
+Keys stay in `.env` (injected at **run** time). They are **not** copied into the image.
 
 ---
 
@@ -250,6 +341,10 @@ Create a `.env` file in the project root (same folder as `main.py`):
 ```env
 GROQ_API_KEY=your_groq_key
 TAVILY_API_KEY=your_tavily_key
+# optional search fallback (Google SERP via serper.dev)
+# SERPER_API_KEY=your_serper_key
+# optional — better US rates / oil / VIX official series
+# FRED_API_KEY=your_fred_key
 ```
 
 Do **not** commit `.env` (it is listed in `.gitignore`).
@@ -352,13 +447,19 @@ pruinsight-agent/
     ├── tools/
     │   ├── market_tools.py # Quotes, news, indices, peers
     │   ├── filings_tools.py# Company filing search / PDF / RAG
-    │   └── amfi_tools.py   # AMFI NAV + fund factsheet tools
+    │   ├── search_providers.py  # Tavily → Serper → DuckDuckGo cascade
+    │   ├── deep_fundamentals.py # Screener-style ratios / quarterly / peers
+    │   ├── transcripts_tools.py # Earnings call transcript search + RAG
+    │   ├── amfi_tools.py   # AMFI NAV + fund factsheet tools
+    │   └── macro_tools.py  # RBI search + FRED/Yahoo macro
     └── agents/
-        ├── tool_loop.py    # Shared multi-round tool calling
+        ├── tool_loop.py
         ├── researcher.py
-        ├── filings.py      # Primary-source filings agent
+        ├── filings.py
+        ├── transcripts.py  # Earnings transcripts agent
         ├── fundamentals.py
-        ├── mf_context.py   # AMFI + factsheet MF desk agent
+        ├── mf_context.py
+        ├── macro.py
         ├── risk.py
         └── synthesizer.py
 ```

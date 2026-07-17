@@ -18,8 +18,10 @@ def initial_state(query: str, symbols: list[str] | None = None) -> dict[str, Any
         ],
         "market_research": "",
         "filings_context": "",
+        "transcripts_context": "",
         "fundamentals": "",
         "mf_context": "",
+        "macro_context": "",
         "risk_assessment": "",
         "final_report": "",
         "messages": [],
@@ -27,10 +29,7 @@ def initial_state(query: str, symbols: list[str] | None = None) -> dict[str, Any
 
 
 def run_research(query: str, symbols: list[str] | None = None) -> dict[str, Any]:
-    """Invoke the full PruInsight pipeline and return the full result state.
-
-    Appends a **Data sources** section (providers + any PDFs ingested this run).
-    """
+    """Invoke the full PruInsight pipeline; append Data sources section."""
     graph = build_graph()
     result = graph.invoke(initial_state(query, symbols))
     return enrich_result_with_sources(result)

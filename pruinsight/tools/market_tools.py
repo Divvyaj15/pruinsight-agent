@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import os
-from typing import Any, Optional
+from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.tools import tool
-from tavily import TavilyClient
 import yfinance as yf
 
-load_dotenv()
-
-_tavily: Optional[TavilyClient] = None
+from pruinsight.tools.search_providers import format_search_response, multi_search
 
 # Yahoo / yfinance index tickers useful for India MF research
 INDEX_MAP = {
@@ -25,16 +20,6 @@ INDEX_MAP = {
     "SENSEX": "^BSESN",
     "USDINR": "INR=X",
 }
-
-
-def _get_tavily() -> TavilyClient:
-    global _tavily
-    if _tavily is None:
-        key = os.getenv("TAVILY_API_KEY")
-        if not key:
-            raise ValueError("TAVILY_API_KEY is not set in environment / .env")
-        _tavily = TavilyClient(api_key=key)
-    return _tavily
 
 
 def _ns_ticker(symbol: str) -> yf.Ticker:
@@ -78,21 +63,13 @@ def web_search(query: str) -> str:
     """Search the web for latest financial news, analysis, filings mentions, and market outlook.
 
     Prefer India-focused queries (company name + NSE, RBI, sector + India).
+    Providers (auto-fallback): Tavily → Serper (if SERPER_API_KEY) → DuckDuckGo (free).
     """
     try:
-        results = _get_tavily().search(query, max_results=6, search_depth="advanced")
-        items = results.get("results") or []
-        if not items:
-            return "No search results found."
-        lines = []
-        for i, r in enumerate(items, 1):
-            title = r.get("title", "Untitled")
-            content = r.get("content", "")
-            url = r.get("url", "")
-            score = r.get("score")
-            score_s = f" (relevance {score:.2f})" if isinstance(score, (int, float)) else ""
-            lines.append(f"{i}. {title}{score_s}\n   {content}\n   Source: {url}")
-        return "\n\n".join(lines)
+        resp = multi_search(query, max_results=6, mode="web")
+        return format_search_response(
+            resp, header="Web search results (multi-provider cascade):"
+        )
     except Exception as e:
         return f"Search failed: {e}"
 
@@ -101,28 +78,13 @@ def web_search(query: str) -> str:
 def news_search(query: str) -> str:
     """Search specifically for recent news articles about a company, sector, or macro topic.
 
-    Uses Tavily topic=news when available; falls back to a news-biased web search.
+    Providers (auto-fallback): Tavily news → Serper news → DuckDuckGo news/text.
     """
     try:
-        client = _get_tavily()
-        try:
-            results = client.search(
-                query, max_results=6, topic="news", days=14, search_depth="basic"
-            )
-        except TypeError:
-            results = client.search(f"{query} latest news India", max_results=6)
-        items = results.get("results") or []
-        if not items:
-            return "No recent news results found."
-        lines = []
-        for i, r in enumerate(items, 1):
-            title = r.get("title", "Untitled")
-            content = r.get("content", "")
-            url = r.get("url", "")
-            published = r.get("published_date") or r.get("publishedDate") or ""
-            pub = f" | {published}" if published else ""
-            lines.append(f"{i}. {title}{pub}\n   {content}\n   Source: {url}")
-        return "\n\n".join(lines)
+        resp = multi_search(query, max_results=6, mode="news")
+        return format_search_response(
+            resp, header="News search results (multi-provider cascade):"
+        )
     except Exception as e:
         return f"News search failed: {e}"
 
@@ -417,7 +379,7 @@ def get_peer_snapshot(symbols: str) -> str:
         return f"Peer snapshot failed: {e}"
 
 
-# Registry for agent tool dispatch
+# Registry for agent tool dispatch (deep fundamentals registered below)
 ALL_TOOLS = [
     web_search,
     news_search,
@@ -430,6 +392,19 @@ ALL_TOOLS = [
     get_peer_snapshot,
 ]
 
+# Late import avoids circular dependency (deep_fundamentals imports helpers from here)
+def _register_deep_tools() -> None:
+    try:
+        from pruinsight.tools.deep_fundamentals import DEEP_FUNDAMENTALS_TOOLS
+
+        for t in DEEP_FUNDAMENTALS_TOOLS:
+            if t not in ALL_TOOLS:
+                ALL_TOOLS.append(t)
+    except Exception:
+        pass
+
+
+_register_deep_tools()
 TOOL_BY_NAME = {t.name: t for t in ALL_TOOLS}
 
 

@@ -94,6 +94,7 @@ class FilingsStore:
 
 _STORE: Optional[FilingsStore] = None
 _FACTSHEET_STORE: Optional[FilingsStore] = None
+_TRANSCRIPT_STORE: Optional[FilingsStore] = None
 _STORE_LOCK = threading.Lock()
 
 
@@ -112,3 +113,12 @@ def get_factsheet_store() -> FilingsStore:
         if _FACTSHEET_STORE is None:
             _FACTSHEET_STORE = FilingsStore()
         return _FACTSHEET_STORE
+
+
+def get_transcript_store() -> FilingsStore:
+    """Separate BM25 corpus for earnings call transcripts (step 6)."""
+    global _TRANSCRIPT_STORE
+    with _STORE_LOCK:
+        if _TRANSCRIPT_STORE is None:
+            _TRANSCRIPT_STORE = FilingsStore()
+        return _TRANSCRIPT_STORE

@@ -1,46 +1,33 @@
-"""Fundamentals Analyst — valuation, statements, performance, peers, analyst view."""
+"""Fundamentals Analyst — Screener-style deep India fundamentals + peers."""
 
-from pruinsight.agents.tool_loop import run_with_tools
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from pruinsight.llm import get_llm
 from pruinsight.state import AgentState
-from pruinsight.tools.market_tools import (
-    get_analyst_view,
-    get_financials,
-    get_peer_snapshot,
-    get_price_history,
-    get_stock_data,
-)
+from pruinsight.tools.deep_fundamentals import programmatic_deep_fundamentals
 
 SYSTEM = """You are a Fundamentals Analyst at ICICI Prudential AMC (PruInsight desk).
 
+You receive a **Screener-style deep fundamentals pack** (ratios, growth, quarterly
+statements, holders, peers) built from Yahoo Finance / yfinance for NSE symbols.
+
 Your job:
-1. Use tools for NSE data (bare symbols: HDFCBANK, RELIANCE, TCS — no .NS).
-2. Typical tool use:
-   - get_stock_data: quote + valuation + quality metrics
-   - get_financials: annual income / balance sheet / cash flow highlights
-   - get_price_history: performance & volatility over 1y (or 6mo/3mo)
-   - get_analyst_view: Street targets / recommendation summary (may be sparse)
-   - get_peer_snapshot: comma-separated peers for relative valuation
-3. Cross-check against the market research context provided.
-4. Be quantitative; flag missing data honestly.
-5. Do NOT give buy/sell recommendations — portfolio-construction context only.
+1. Interpret the pack quantitatively — valuation, quality, growth, leverage, cash.
+2. Reconcile with filings brief when numbers conflict (prefer filings for disclosed facts).
+3. Flag missing data honestly (Yahoo often lacks full Indian promoter/FII tables).
+4. Peer context: relative P/E, P/B, ROE — not a ranking recommendation.
+5. Do NOT give buy/sell recommendations — portfolio-construction framing only.
 
 Output sections:
-- Snapshot metrics
-- Performance (price history)
-- Financial statement highlights
-- Valuation view (cheap / fair / rich — with caveats)
-- Quality of business (returns, margins, balance sheet)
-- Peer / analyst context (if available)
-- What matters most for a mutual fund holding horizon
+- Company / sector snapshot
+- Valuation (cheap / fair / rich with caveats)
+- Growth trajectory (revenue, profits, quarterly color)
+- Quality & balance sheet
+- Shareholding notes (if any)
+- Peer comparison
+- What matters for a mutual fund holding horizon
+- Data gaps
 """
-
-FUNDAMENTALS_TOOLS = [
-    get_stock_data,
-    get_financials,
-    get_price_history,
-    get_analyst_view,
-    get_peer_snapshot,
-]
 
 
 def _infer_symbols(state: AgentState) -> list[str]:
@@ -72,6 +59,9 @@ def _infer_symbols(state: AgentState) -> list[str]:
         "bajaj finance": "BAJFINANCE",
         "maruti": "MARUTI",
         "titan": "TITAN",
+        "asian paints": "ASIANPAINT",
+        "ultratech": "ULTRACEMCO",
+        "sun pharma": "SUNPHARMA",
     }
     ql = q.lower()
     for phrase, sym in aliases.items():
@@ -81,65 +71,47 @@ def _infer_symbols(state: AgentState) -> list[str]:
 
 
 def fundamentals_node(state: AgentState) -> dict:
-    """Pull and interpret NSE fundamentals for symbols in scope."""
+    """Deep Screener-style pack + LLM interpretation."""
     symbols = _infer_symbols(state)
     research = state.get("market_research") or "(no prior market research)"
     filings = state.get("filings_context") or "(no filings context)"
-    symbol_line = (
-        f"Primary symbols: {', '.join(symbols)}. Fetch data for each."
-        if symbols
-        else "Infer NSE symbols from the query and fetch data for the main names."
-    )
-    peers_hint = ""
-    if len(symbols) >= 2:
-        peers_hint = f"\nAlso call get_peer_snapshot with: {','.join(symbols)}"
+
+    # Deterministic deep data (reliable vs pure tool-calling)
+    if symbols:
+        deep_pack = programmatic_deep_fundamentals(symbols)
+    else:
+        deep_pack = (
+            "No NSE symbols in scope — skip deep screener pack. "
+            "Pass -s SYMBOLS (e.g. HDFCBANK) or name a major company in the query."
+        )
 
     user_msg = f"""Query: {state['query']}
-{symbol_line}{peers_hint}
+Symbols: {', '.join(symbols) or 'N/A'}
 
-Prior market research:
-{research}
+Prior market research (context):
+{research[:2000]}
 
-Primary-source / filings brief (prefer numbers disclosed in filings when reconciling):
-{filings}
+Primary-source / filings brief (prefer for disclosed facts):
+{filings[:2500]}
 
-Use tools (stock data, financials, price history, analyst view as needed) and produce your analysis brief.
+Earnings / management transcript brief (tone & guidance color):
+{(state.get('transcripts_context') or 'N/A')[:2000]}
+
+=== Screener-style deep fundamentals pack (yfinance) ===
+{deep_pack[:28000]}
+
+Write the fundamentals analysis brief for the MF desk now.
 """
 
-    content, trace = run_with_tools(
-        SYSTEM, user_msg, FUNDAMENTALS_TOOLS, temperature=0.1, max_rounds=2
-    )
-
-    # Ensure we at least attempted direct data if model skipped tools but we know symbols
-    if symbols and not any(
-        getattr(m, "type", None) == "tool" or m.__class__.__name__ == "ToolMessage"
-        for m in trace
-    ):
-        dumps = []
-        for sym in symbols:
-            dumps.append(get_stock_data.invoke({"symbol": sym}))
-            dumps.append(get_price_history.invoke({"symbol": sym, "period": "1y"}))
-        from langchain_core.messages import HumanMessage
-
-        from pruinsight.llm import get_llm
-
-        final = get_llm(temperature=0.1).invoke(
-            [
-                HumanMessage(
-                    content=(
-                        user_msg
-                        + "\n\nRaw tool dumps:\n\n"
-                        + "\n\n".join(str(d) for d in dumps)
-                        + "\n\nWrite the fundamentals brief now."
-                    )
-                )
-            ]
-        )
-        content = final.content if isinstance(final.content, str) else str(final.content)
-        trace = list(trace) + [final]
+    messages = [
+        SystemMessage(content=SYSTEM),
+        HumanMessage(content=user_msg),
+    ]
+    response = get_llm(temperature=0.1).invoke(messages)
+    content = response.content if isinstance(response.content, str) else str(response.content)
 
     return {
         "fundamentals": content,
         "symbols": symbols,
-        "messages": trace,
+        "messages": [response],
     }

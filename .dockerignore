@@ -1,0 +1,27 @@
+# Keep the image small and avoid leaking secrets / junk
+
+.env
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.git/
+.gitignore
+*.log
+*.pdf
+_test_report.pdf
+.DS_Store
+
+# Local notes (not needed in the container)
+MY_PROJECT_GUIDE.md
+PRIVATE_*.md
+NOTES_PRIVATE.md
+DOCKER_LEARNING.md
+
+# IDE
+.vscode/
+.idea/

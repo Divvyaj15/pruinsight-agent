@@ -52,27 +52,42 @@ st.markdown(
 PIPELINE_STEPS = [
     ("researcher", "Market Researcher", "Web/news search, company headlines, indices"),
     ("filings", "Filings Analyst", "SEBI/BSE/NSE/IR PDFs + BM25 RAG"),
-    ("fundamentals", "Fundamentals Analyst", "Quote, financials, history, peers, Street view"),
+    ("transcripts", "Transcripts Analyst", "Earnings call transcripts + BM25 RAG"),
+    ("fundamentals", "Fundamentals Analyst", "Screener-style ratios, quarterly, holders, peers"),
     ("mf_context", "MF Context (AMFI)", "AMFI NAVs + fund factsheet RAG"),
+    ("macro", "Macro Analyst", "RBI policy + India/global macro (FRED optional)"),
     ("risk", "Risk Assessor", "Downside risks + vol / VIX context"),
     ("synthesizer", "Report Synthesizer", "Final MF-desk note"),
 ]
 
 TOOL_CATALOG = [
-    ("web_search", "Tavily — broad web research"),
-    ("news_search", "Tavily news topic — recent articles"),
+    ("web_search", "Tavily → Serper → DuckDuckGo cascade"),
+    ("news_search", "News cascade (same providers)"),
     ("get_company_news", "Yahoo Finance company headlines"),
     ("search_company_filings", "Find annual reports / results / exchange docs"),
     ("ingest_filing_pdf", "Download PDF + chunk into RAG store"),
     ("query_filings_rag", "BM25 retrieve excerpts from ingested PDFs"),
+    ("search_earnings_transcripts", "Find earnings call / concall transcripts"),
+    ("ingest_transcript_document", "PDF/HTML transcript → transcript RAG"),
+    ("query_transcripts_rag", "BM25 retrieve transcript excerpts"),
     ("search_amfi_schemes", "AMFI scheme search (official NAVAll)"),
     ("get_amfi_nav", "AMFI latest NAV by code/name"),
     ("search_related_equity_funds", "Theme → equity schemes + NAV"),
     ("search_fund_factsheet", "Find AMC factsheet PDFs"),
     ("ingest_fund_factsheet_pdf", "Factsheet PDF → factsheet RAG store"),
     ("query_factsheet_rag", "BM25 retrieve factsheet excerpts"),
+    ("get_macro_dashboard", "India + global macro pack"),
+    ("get_india_market_macro", "Nifty, Sensex, India VIX, USDINR"),
+    ("get_rbi_policy_context", "RBI/MPC policy search (Tavily)"),
+    ("get_global_macro_snapshot", "FRED or Yahoo global proxies"),
+    ("get_fred_series", "Single FRED series (needs FRED_API_KEY)"),
     ("get_stock_data", "NSE quote + valuation metrics"),
     ("get_financials", "Annual income / BS / cash flow"),
+    ("get_screener_style_snapshot", "Deep ratios + quarterly + holders pack"),
+    ("get_key_ratios_growth", "Valuation, margins, growth, FCF"),
+    ("get_quarterly_financials", "Quarterly statements"),
+    ("get_shareholding_overview", "Major / institutional holders"),
+    ("get_default_peer_set", "Sector peer metrics snapshot"),
     ("get_price_history", "Returns & volatility"),
     ("get_analyst_view", "Targets & recommendations"),
     ("get_index_snapshot", "NIFTY, Bank Nifty, India VIX, Sensex, USDINR"),
@@ -106,10 +121,20 @@ def _parse_symbols(raw: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def _keys_status() -> tuple[bool, bool]:
-    groq = bool(os.getenv("GROQ_API_KEY"))
-    tavily = bool(os.getenv("TAVILY_API_KEY"))
-    return groq, tavily
+def _keys_status() -> dict[str, bool]:
+    try:
+        from pruinsight.tools.search_providers import provider_status
+
+        search = provider_status()
+    except Exception:
+        search = {"tavily": bool(os.getenv("TAVILY_API_KEY")), "serper": False, "duckduckgo": False}
+    return {
+        "groq": bool(os.getenv("GROQ_API_KEY")),
+        "tavily": search.get("tavily", False),
+        "serper": search.get("serper", False),
+        "duckduckgo": search.get("duckduckgo", False),
+        "fred": bool(os.getenv("FRED_API_KEY") or os.getenv("FRED_KEY")),
+    }
 
 
 @st.cache_resource(show_spinner=False)
@@ -124,12 +149,31 @@ def _render_sidebar() -> None:
         st.markdown("### PruInsight")
         st.caption("Multi-agent equity research for a mutual-fund desk (demo).")
 
-        groq_ok, tavily_ok = _keys_status()
-        st.markdown("**API keys**")
-        st.write(("✅" if groq_ok else "❌") + " `GROQ_API_KEY`")
-        st.write(("✅" if tavily_ok else "❌") + " `TAVILY_API_KEY`")
-        if not (groq_ok and tavily_ok):
-            st.warning("Add missing keys to `.env` and restart Streamlit.")
+        keys = _keys_status()
+        st.markdown("**API keys / search**")
+        st.write(("✅" if keys["groq"] else "❌") + " `GROQ_API_KEY` (required)")
+        st.write(
+            ("✅" if keys["tavily"] else "⚪")
+            + " `TAVILY_API_KEY` (preferred primary search)"
+        )
+        st.write(
+            ("✅" if keys["serper"] else "⚪")
+            + " `SERPER_API_KEY` (optional Google SERP fallback)"
+        )
+        st.write(
+            ("✅" if keys["duckduckgo"] else "❌")
+            + " DuckDuckGo free fallback (`ddgs` package)"
+        )
+        st.write(
+            ("✅" if keys["fred"] else "⚪")
+            + " `FRED_API_KEY` (optional macro series)"
+        )
+        if not keys["groq"]:
+            st.warning("Add `GROQ_API_KEY` to `.env` and restart Streamlit.")
+        elif not keys["tavily"] and not keys["duckduckgo"]:
+            st.warning("Need Tavily key or `pip install ddgs` for web search.")
+        else:
+            st.caption("Search order: Tavily → Serper → DuckDuckGo")
 
         st.divider()
         st.markdown("**Pipeline**")
@@ -167,7 +211,7 @@ def main() -> None:
     )
     st.write(
         "Run the multi-agent pipeline: "
-        "**Researcher → Filings → Fundamentals → MF Context (AMFI) → Risk → Synthesizer**."
+        "**Researcher → Filings → Transcripts → Fundamentals → MF → Macro → Risk → Synthesizer**."
     )
 
     # Defaults for widgets
@@ -205,12 +249,15 @@ def main() -> None:
             st.error("Please enter a research query.")
             return
 
-        groq_ok, tavily_ok = _keys_status()
-        if not groq_ok:
+        keys = _keys_status()
+        if not keys["groq"]:
             st.error("`GROQ_API_KEY` is missing from the environment / `.env`.")
             return
-        if not tavily_ok:
-            st.error("`TAVILY_API_KEY` is missing from the environment / `.env`.")
+        if not keys["tavily"] and not keys["serper"] and not keys["duckduckgo"]:
+            st.error(
+                "No search backend available. Set `TAVILY_API_KEY` and/or "
+                "`SERPER_API_KEY`, or `pip install ddgs` for free DuckDuckGo."
+            )
             return
 
         symbols = _parse_symbols(symbols_raw)
@@ -222,9 +269,9 @@ def main() -> None:
         # Sequential progress UI while the (blocking) graph runs
         # LangGraph invoke is one shot; we stage UX then fill results after.
         status.info(
-            "Agents running: researcher → filings → fundamentals → mf_context → risk → synthesizer …"
+            "Agents: researcher → filings → transcripts → fundamentals → mf → macro → risk → synthesizer …"
         )
-        progress.progress(10, text="Researcher + filings + AMFI MF context …")
+        progress.progress(10, text="Researcher → filings → transcripts → …")
 
         try:
             with st.spinner("Running multi-agent graph (may take 20–60s)…"):
@@ -268,8 +315,10 @@ def main() -> None:
             [
                 "Market Research",
                 "Filings",
+                "Transcripts",
                 "Fundamentals",
                 "MF / AMFI",
+                "Macro",
                 "Risk",
                 "Pipeline",
             ]
@@ -279,12 +328,16 @@ def main() -> None:
         with tabs[1]:
             st.markdown(result.get("filings_context") or "_No output_")
         with tabs[2]:
-            st.markdown(result.get("fundamentals") or "_No output_")
+            st.markdown(result.get("transcripts_context") or "_No output_")
         with tabs[3]:
-            st.markdown(result.get("mf_context") or "_No output_")
+            st.markdown(result.get("fundamentals") or "_No output_")
         with tabs[4]:
-            st.markdown(result.get("risk_assessment") or "_No output_")
+            st.markdown(result.get("mf_context") or "_No output_")
         with tabs[5]:
+            st.markdown(result.get("macro_context") or "_No output_")
+        with tabs[6]:
+            st.markdown(result.get("risk_assessment") or "_No output_")
+        with tabs[7]:
             for i, (_, name, desc) in enumerate(PIPELINE_STEPS, 1):
                 st.markdown(f"{i}. **{name}** — {desc}")
 

@@ -23,48 +23,60 @@ def build_sources_section(
         "",
         "### Platform / model",
         "1. **Groq API** — large language model inference for all agents "
-        "(market research, filings summary, fundamentals interpretation, MF context, "
-        "risk assessment, and final report synthesis).",
+        "(market research, filings, transcripts, fundamentals, MF context, macro, risk, synthesis).",
         "",
         "### Search & discovery",
-        "2. **Tavily Search API** — web research, news-oriented search, and discovery of "
-        "company filing / investor-relations / **mutual fund factsheet** document URLs "
-        "(including links often hosted on BSE, NSE, SEBI, AMC sites, or company IR pages).",
+        "2. **Web search cascade** — primary **Tavily**; if it fails or returns nothing, "
+        "optional **Serper** (`SERPER_API_KEY`); then free **DuckDuckGo** (`ddgs`). "
+        "Used for news, filings, **earnings transcripts**, fund factsheets, and RBI policy narrative.",
         "",
         "### Market data",
-        "3. **Yahoo Finance** (via the **yfinance** library) — NSE stock quotes (`SYMBOL.NS`), "
-        "valuation and quality metrics, annual financial statement highlights, price history "
-        "and volatility estimates, company news headlines, analyst target summaries (when available), "
-        "and index snapshots (**Nifty 50**, **Nifty Bank**, **India VIX**, **Sensex**, **USD/INR**).",
+        "3. **Yahoo Finance** (via **yfinance**) — NSE quotes, annual/quarterly statements, "
+        "key ratios & growth, holders (best-effort), history, company news, analyst targets, "
+        "default peer sets (Screener-style pack), and market/macro proxies "
+        "(**Nifty 50**, **Sensex**, **India VIX**, **USD/INR**, VIX, WTI, gold, US10Y).",
+        "",
+        "### Macro — global (optional official series)",
+        "4. **FRED (Federal Reserve Bank of St. Louis)** — official US rates, curve, VIX, oil, USD/INR series "
+        "when `FRED_API_KEY` is set (`https://fred.stlouisfed.org/`). If the key is absent, global block "
+        "falls back to Yahoo proxies.",
+        "",
+        "### Macro — India policy",
+        "5. **Reserve Bank of India** — policy/MPC context via multi-provider search of public RBI communications "
+        "(`https://www.rbi.org.in/`). Official statistical warehouse: **DBIE** "
+        "(`https://dbie.rbi.org.in/`) referenced for users; this demo does not scrape full DBIE tables.",
         "",
         "### Mutual fund industry data (AMFI)",
-        "4. **Association of Mutual Funds in India (AMFI)** — official scheme universe and latest "
-        "NAVs from `https://portal.amfiindia.com/spages/NAVAll.txt` (scheme code, name, NAV, date, "
-        "category banners, AMC grouping). Used for MF desk context and representative scheme snapshots.",
+        "6. **AMFI** — scheme universe and latest NAVs from "
+        "`https://portal.amfiindia.com/spages/NAVAll.txt`.",
         "",
         "### Primary documents (company filings)",
-        "5. **Exchange / company PDF filings** — annual reports, quarterly results, earnings-call "
-        "materials, and related disclosures. Documents are located via search, downloaded over HTTP, "
-        "text-extracted with **pypdf**, chunked, and retrieved with **BM25** RAG. Typical hosts:",
-        "   - NSE archives / NSE India (`nsearchives.nseindia.com`, `nseindia.com`)",
-        "   - BSE India (`bseindia.com`)",
-        "   - SEBI (`sebi.gov.in`)",
-        "   - Company investor-relations websites",
+        "7. **Exchange / company PDF filings** — AR / results / IR docs via search + **pypdf** + **BM25** RAG "
+        "(NSE / BSE / SEBI / company IR hosts).",
+        "",
+        "### Earnings transcripts",
+        "8. **Earnings call / conference call transcripts** — discovered via multi-provider search, "
+        "ingested as PDF or HTML text, chunked, and retrieved with a separate **BM25** transcript store "
+        "(management guidance, Q&A themes). Many full transcripts are paywalled; coverage is best-effort.",
         "",
         "### Mutual fund documents (factsheets)",
-        "6. **AMC fund factsheets / related PDFs** — scheme factsheets and similar documents discovered "
-        "via search, downloaded, text-extracted with **pypdf**, and retrieved with a separate **BM25** "
-        "factsheet store (objective, benchmark, riskometer, holdings excerpts when present).",
+        "9. **AMC fund factsheets** — PDF discovery + **pypdf** + separate **BM25** factsheet store.",
     ]
 
     try:
-        from pruinsight.rag.store import get_factsheet_store, get_filings_store
+        from pruinsight.rag.store import (
+            get_factsheet_store,
+            get_filings_store,
+            get_transcript_store,
+        )
 
         sources = list(get_filings_store().sources)
         factsheets = list(get_factsheet_store().sources)
+        transcripts = list(get_transcript_store().sources)
     except Exception:
         sources = []
         factsheets = []
+        transcripts = []
 
     lines.append("")
     if sources:
@@ -100,6 +112,25 @@ def build_sources_section(
         lines.append(
             "_No fund factsheet PDFs were successfully ingested in this run. "
             "MF context may rely on AMFI NAV data and search snippets only._"
+        )
+
+    lines.append("")
+    if transcripts:
+        lines.append("### Earnings transcripts ingested in this run")
+        for i, s in enumerate(transcripts, 1):
+            title = s.get("title") or "Untitled transcript"
+            url = s.get("url") or "N/A"
+            pages = s.get("pages", "N/A")
+            chars = s.get("chars", "N/A")
+            lines.append(f"{i}. **{title}**")
+            lines.append(f"   - Source URL: {url}")
+            lines.append(f"   - Pages/sections: {pages} | Characters extracted: {chars}")
+    else:
+        lines.append("### Earnings transcripts ingested in this run")
+        lines.append(
+            "_No earnings transcripts were successfully ingested in this run. "
+            "Management commentary may be limited to news/search snippets or missing entirely "
+            "(paywalls, JS-only pages, or no public transcript found)._"
         )
 
     lines.extend(

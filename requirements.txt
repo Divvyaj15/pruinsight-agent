@@ -10,3 +10,4 @@ pypdf>=4.0.0
 rank-bm25>=0.2.2
 requests>=2.31.0
 fpdf2>=2.7.0
+ddgs>=9.0.0
