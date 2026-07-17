@@ -1,4 +1,7 @@
-"""LangGraph multi-agent workflow for PruInsight."""
+"""LangGraph multi-agent workflow for PruInsight.
+
+Also used by LangSmith Studio via `langgraph.json` → `pruinsight.graph:app`.
+"""
 
 from langgraph.graph import END, StateGraph
 
@@ -11,6 +14,10 @@ from pruinsight.agents.risk import risk_node
 from pruinsight.agents.synthesizer import synthesizer_node
 from pruinsight.agents.transcripts import transcripts_node
 from pruinsight.state import AgentState
+from pruinsight.tracing import configure_tracing
+
+# Studio / CLI: enable LangSmith when LANGSMITH_API_KEY is present
+configure_tracing()
 
 
 def build_graph():
@@ -44,4 +51,6 @@ def build_graph():
     return workflow.compile()
 
 
+# Compiled graph export for LangSmith Studio (`langgraph dev`)
 app = build_graph()
+

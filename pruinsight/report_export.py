@@ -25,6 +25,10 @@ def build_sources_section(
         "1. **Groq API** — large language model inference for all agents "
         "(market research, filings, transcripts, fundamentals, MF context, macro, risk, synthesis).",
         "",
+        "### Observability",
+        "1b. **LangSmith** (when `LANGSMITH_API_KEY` is set) — traces of the LangGraph pipeline, "
+        "LLM calls, and tool invocations for debugging (`https://smith.langchain.com`).",
+        "",
         "### Search & discovery",
         "2. **Web search cascade** — primary **Tavily**; if it fails or returns nothing, "
         "optional **Serper** (`SERPER_API_KEY`); then free **DuckDuckGo** (`ddgs`). "

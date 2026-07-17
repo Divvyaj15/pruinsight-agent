@@ -13,6 +13,7 @@ It produces a structured mutual-fund-style research note for Indian (NSE) stocks
 | **[README.md](./README.md)** (this file) | Setup, run, usage, troubleshooting |
 | **[TECH_STACK_AND_HOW_IT_WORKS.md](./TECH_STACK_AND_HOW_IT_WORKS.md)** | **Full tech stack, architecture, every agent/tool, data flow** |
 | **[DOCKER_LEARNING.md](./DOCKER_LEARNING.md)** | Step-by-step Docker tutorial |
+| **[LANGSMITH_STUDIO_SETUP.md](./LANGSMITH_STUDIO_SETUP.md)** | LangSmith Studio / `langgraph dev` |
 | `MY_PROJECT_GUIDE.md` | Private notes (gitignored, local only) |
 
 ---
@@ -267,7 +268,8 @@ Below is a practical map for **Indian equity / MF research**. Pick by budget, re
 - API keys:
   - [Groq](https://console.groq.com/) — LLM (required)  
   - [Tavily](https://tavily.com/) — web / news / RBI search (required)  
-  - [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) — global macro series (optional)
+  - [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) — global macro series (optional)  
+  - [LangSmith](https://smith.langchain.com) — LangGraph/LLM tracing (optional but recommended)
 
 ---
 
@@ -345,7 +347,29 @@ TAVILY_API_KEY=your_tavily_key
 # SERPER_API_KEY=your_serper_key
 # optional — better US rates / oil / VIX official series
 # FRED_API_KEY=your_fred_key
+
+# LangSmith tracing (https://smith.langchain.com) — auto-on when key is set
+LANGSMITH_API_KEY=lsv2_your_key
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=pruinsight-agent
 ```
+
+See **`.env.example`** for a full template.
+
+**LangSmith traces (after any run):**  
+[smith.langchain.com](https://smith.langchain.com) → project **pruinsight-agent**
+
+**LangSmith Studio (visual graph IDE):**
+
+```bash
+pip install -U "langgraph-cli[inmem]"
+pip install -e .
+langgraph dev
+# open Studio URL → select graph "pruinsight"
+```
+
+Full steps: **[LANGSMITH_STUDIO_SETUP.md](./LANGSMITH_STUDIO_SETUP.md)**  
+Sample input: `studio_input.example.json`
 
 Do **not** commit `.env` (it is listed in `.gitignore`).
 
@@ -367,25 +391,22 @@ Do **not** commit `.env` (it is listed in `.gitignore`).
 
 2. Browser opens (usually `http://localhost:8501`).
 
-3. **Sidebar**
-   - Shows whether `GROQ_API_KEY` and `TAVILY_API_KEY` are loaded  
-   - Explains the 4-agent pipeline  
-   - Lists **research tools**  
-   - **Examples** dropdown — pick a preset and click **Apply example**
+3. **Sidebar** — API keys, 8-agent pipeline, tools, example presets  
 
 4. **Main form**
-   - **Research query** — free-text question  
-   - **NSE symbols** — optional, comma-separated, **without** `.NS`  
-   - **Show agent intermediates** — tabs for each agent’s draft  
+   - Research query + NSE symbols (enable charts)  
+   - Toggles: **Show charts & KPIs**, **Show agent workpapers**  
    - Click **Generate research note**
 
-5. Wait **~30–90 seconds** (more tools = more API calls).
+5. Wait **~1–3 minutes** (full multi-agent run).
 
-6. **Results**
-   - Intermediate tabs: Market Research, Fundamentals, Risk, Pipeline  
-   - **Final PruInsight note** — full markdown report  
-   - **Download note (.md)** or **Download note (.pdf)** — save the report locally  
-   - **Data sources** section at the bottom of every note (Groq, Tavily, Yahoo Finance/yfinance, exchange/company PDFs + URLs ingested that run)
+6. **Results (optimized layout)**
+   - **KPI cards** — price, P/E, P/B, ROE, mkt cap, 52w position  
+   - **Charts** — price history line chart; peer bar chart (P/E, P/B, ROE, Beta)  
+   - **Research note** — section tabs by heading (or full scroll)  
+   - **Agent workpapers** — Ready/Thin status + full intermediate briefs  
+   - **Export** — Markdown, PDF, plain text  
+   - **Data sources** expander (APIs + ingested PDF/transcript URLs)
 
 ---
 
@@ -431,7 +452,7 @@ python main.py "HDFC Bank for MF desk" -s HDFCBANK --pdf hdfc_note.pdf
 ```
 pruinsight-agent/
 ├── main.py                 # CLI entry
-├── streamlit_app.py        # Streamlit web UI
+├── streamlit_app.py        # Streamlit UI (KPIs, charts, sectioned report)
 ├── requirements.txt
 ├── .env                    # API keys (local only — do not commit)
 ├── .gitignore
@@ -442,6 +463,8 @@ pruinsight-agent/
     ├── graph.py            # StateGraph wiring
     ├── runner.py           # Shared run_research() for CLI + UI
     ├── report_export.py    # Data sources appendix + Markdown/PDF export
+    ├── viz_data.py         # KPI/chart data + report section parser
+    ├── tracing.py          # LangSmith enable + run tags/metadata
     ├── rag/
     │   └── store.py        # BM25 filings chunk store
     ├── tools/

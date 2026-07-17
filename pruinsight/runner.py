@@ -6,6 +6,7 @@ from typing import Any
 
 from pruinsight.graph import build_graph
 from pruinsight.report_export import enrich_result_with_sources
+from pruinsight.tracing import configure_tracing, run_config, tracing_status
 
 
 def initial_state(query: str, symbols: list[str] | None = None) -> dict[str, Any]:
@@ -28,8 +29,23 @@ def initial_state(query: str, symbols: list[str] | None = None) -> dict[str, Any
     }
 
 
-def run_research(query: str, symbols: list[str] | None = None) -> dict[str, Any]:
-    """Invoke the full PruInsight pipeline; append Data sources section."""
+def run_research(
+    query: str,
+    symbols: list[str] | None = None,
+    *,
+    source: str = "cli",
+) -> dict[str, Any]:
+    """Invoke the full PruInsight pipeline; append Data sources section.
+
+    When LangSmith is configured (LANGSMITH_API_KEY), each run is traced with
+    tags/metadata for the 8-agent LangGraph pipeline.
+    """
+    # Must run before graph/LLM activity
+    status = configure_tracing()
+
     graph = build_graph()
-    result = graph.invoke(initial_state(query, symbols))
-    return enrich_result_with_sources(result)
+    config = run_config(query=query, symbols=symbols or [], source=source)
+    result = graph.invoke(initial_state(query, symbols), config=config)
+    out = enrich_result_with_sources(result)
+    out["langsmith"] = status
+    return out

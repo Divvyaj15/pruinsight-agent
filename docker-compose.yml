@@ -17,7 +17,7 @@ services:
       # host:container  →  browser uses host port 8501
       - "8501:8501"
     env_file:
-      # Loads GROQ_API_KEY, TAVILY_API_KEY, optional SERPER_API_KEY / FRED_API_KEY
+      # Loads GROQ_API_KEY, TAVILY_API_KEY, LANGSMITH_*, optional SERPER/FRED
       # (file stays on your machine; not baked into the image)
       - .env
     environment:

@@ -17,11 +17,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pruinsight.runner import run_research
+from pruinsight.tracing import configure_tracing, tracing_status
 
 
 def run(query: str, symbols: list[str] | None = None) -> str:
     """Invoke the multi-agent graph and return the final report."""
-    result = run_research(query, symbols)
+    result = run_research(query, symbols, source="cli")
     return result.get("final_report") or "(no report generated)"
 
 
@@ -64,9 +65,22 @@ def main() -> None:
         "Running agents: researcher → filings → transcripts → fundamentals → mf → macro → risk → synthesizer ...\n"
     )
 
+    ts = configure_tracing()
+    if ts.get("enabled"):
+        print(
+            f"LangSmith tracing: ON  project={ts.get('project')}  "
+            f"(https://smith.langchain.com)\n"
+        )
+    else:
+        print(
+            "LangSmith tracing: OFF  "
+            "(add LANGSMITH_API_KEY to .env to enable)\n"
+        )
+
     result = run_research(
         args.query,
         [s.upper() for s in (args.symbols or [])],
+        source="cli",
     )
 
     if args.verbose:

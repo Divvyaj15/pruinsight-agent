@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pruinsight-agent"
+version = "0.1.0"
+description = "Multi-agent equity research (LangGraph) for mutual-fund style notes"
+readme = "README.md"
+requires-python = ">=3.11"
+# Runtime deps also listed in requirements.txt for pip install -r
+dependencies = [
+  "langgraph>=0.2.0",
+  "langchain>=0.3.0",
+  "langchain-groq>=0.2.0",
+  "langchain-core>=0.3.0",
+  "langsmith>=0.3.0",
+  "python-dotenv>=1.0.0",
+  "tavily-python>=0.5.0",
+  "yfinance>=0.2.40",
+  "streamlit>=1.32.0",
+  "pypdf>=4.0.0",
+  "rank-bm25>=0.2.2",
+  "requests>=2.31.0",
+  "fpdf2>=2.7.0",
+  "ddgs>=9.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["pruinsight*"]

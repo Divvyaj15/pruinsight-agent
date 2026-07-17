@@ -1,0 +1,8 @@
+{
+  "python_version": "3.11",
+  "dependencies": ["."],
+  "graphs": {
+    "pruinsight": "./pruinsight/graph.py:app"
+  },
+  "env": ".env"
+}
