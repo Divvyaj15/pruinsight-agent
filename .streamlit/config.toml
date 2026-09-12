@@ -1,3 +1,15 @@
+[theme]
+base = "light"
+primaryColor = "#C4A35A"
+backgroundColor = "#F4F0E6"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#15202B"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true
+
 [server]
 headless = true
 port = 8501

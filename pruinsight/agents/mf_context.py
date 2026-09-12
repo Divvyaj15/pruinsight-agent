@@ -1,8 +1,6 @@
 """MF Context agent — AMFI NAVs + fund factsheets for mutual-fund desk lens."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import invoke_chat
 from pruinsight.state import AgentState
 from pruinsight.tools.amfi_tools import programmatic_mf_brief
 
@@ -42,16 +40,12 @@ Prior fundamentals (short context):
 {(state.get('fundamentals') or 'N/A')[:1500]}
 
 === Raw AMFI + factsheet pipeline output ===
-{raw[:28000]}
+{raw[:6000]}
 
 Write the mutual-fund desk context brief now.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = get_llm(temperature=0.15).invoke(messages)
+    response = invoke_chat(SYSTEM, user_msg, role="mf_context")
     content = response.content if isinstance(response.content, str) else str(response.content)
 
     return {

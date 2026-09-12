@@ -352,7 +352,26 @@ TAVILY_API_KEY=your_tavily_key
 LANGSMITH_API_KEY=lsv2_your_key
 LANGSMITH_TRACING=true
 LANGSMITH_PROJECT=pruinsight-agent
+
+# Multi-model (optional) — different Groq models per agent role
+# GROQ_MODEL_FAST=openai/gpt-oss-20b
+# GROQ_MODEL_SMART=openai/gpt-oss-20b
+# GROQ_MODEL_ANALYSIS=openai/gpt-oss-20b
 ```
+
+### Multi-model optimization
+
+Agents can use different Groq models via roles in `pruinsight/llm.py`:
+
+| Role | Typical use | Env var |
+|------|-------------|---------|
+| `tool_loop` / `fast` | Researcher tool rounds | `GROQ_MODEL_FAST` |
+| `analysis` | Filings, fundamentals, MF, macro, risk, transcripts | `GROQ_MODEL_ANALYSIS` |
+| `synthesizer` / `smart` | Final IC note | `GROQ_MODEL_SMART` |
+| `default` | Fallback | `GROQ_MODEL_DEFAULT` |
+
+**Recipe for speed/cost:** smaller model for `FAST`, stronger model for `SMART`.  
+List models: [console.groq.com/docs/models](https://console.groq.com/docs/models)
 
 See **`.env.example`** for a full template.
 
@@ -391,22 +410,22 @@ Do **not** commit `.env` (it is listed in `.gitignore`).
 
 2. Browser opens (usually `http://localhost:8501`).
 
-3. **Sidebar** — API keys, 8-agent pipeline, tools, example presets  
+3. **Sidebar** — system status, 8-agent pipeline, tools, desk presets  
 
-4. **Main form**
-   - Research query + NSE symbols (enable charts)  
-   - Toggles: **Show charts & KPIs**, **Show agent workpapers**  
-   - Click **Generate research note**
+4. **Main desk**
+   - Navy masthead with live **Nifty / Sensex / India VIX / USD-INR** tape  
+   - Research question + NSE symbols  
+   - Toggles: **Charts & KPIs**, **Agent workpapers**  
+   - Click **Run research pipeline** (or load a desk preset)
 
-5. Wait **~1–3 minutes** (full multi-agent run).
+5. Watch the **live 8-agent stepper** (typically **1–3 minutes**).
 
-6. **Results (optimized layout)**
-   - **KPI cards** — price, P/E, P/B, ROE, mkt cap, 52w position  
-   - **Charts** — price history line chart; peer bar chart (P/E, P/B, ROE, Beta)  
-   - **Research note** — section tabs by heading (or full scroll)  
-   - **Agent workpapers** — Ready/Thin status + full intermediate briefs  
-   - **Export** — Markdown, PDF, plain text  
-   - **Data sources** expander (APIs + ingested PDF/transcript URLs)
+6. **Results**
+   - **Overview** — KPI cards (price, change, P/E, P/B, ROE, 52w range) + executive snapshot  
+   - **Charts** — Altair price history and peer comparison  
+   - **Research note** — masthead + section tabs (or full scroll)  
+   - **Workpapers** — Ready/Thin status + each agent's brief  
+   - **Export & sources** — Markdown, PDF, plain text, data-sources appendix
 
 ---
 
@@ -452,7 +471,8 @@ python main.py "HDFC Bank for MF desk" -s HDFCBANK --pdf hdfc_note.pdf
 ```
 pruinsight-agent/
 ├── main.py                 # CLI entry
-├── streamlit_app.py        # Streamlit UI (KPIs, charts, sectioned report)
+├── streamlit_app.py        # Streamlit research-desk UI
+├── .streamlit/config.toml  # Navy/gold theme
 ├── requirements.txt
 ├── .env                    # API keys (local only — do not commit)
 ├── .gitignore
@@ -464,6 +484,7 @@ pruinsight-agent/
     ├── runner.py           # Shared run_research() for CLI + UI
     ├── report_export.py    # Data sources appendix + Markdown/PDF export
     ├── viz_data.py         # KPI/chart data + report section parser
+    ├── ui_theme.py         # Research-desk CSS + HTML fragments
     ├── tracing.py          # LangSmith enable + run tags/metadata
     ├── rag/
     │   └── store.py        # BM25 filings chunk store

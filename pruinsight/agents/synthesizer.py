@@ -1,8 +1,6 @@
 """Report Synthesizer — final mutual-fund-oriented investment note."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import clip_text, invoke_chat
 from pruinsight.state import AgentState
 
 SYSTEM = """You are the Lead Equity Research Writer at ICICI Prudential AMC (PruInsight).
@@ -44,41 +42,36 @@ DISCLAIMER = """
 
 
 def synthesizer_node(state: AgentState) -> dict:
-    llm = get_llm(temperature=0.2)
-
+    sec = 900
     user_msg = f"""Original query: {state['query']}
 Symbols: {', '.join(state.get('symbols') or []) or 'N/A'}
 
 === Market research ===
-{state.get('market_research') or 'N/A'}
+{clip_text(state.get('market_research') or 'N/A', sec)}
 
 === Macro / RBI / global ===
-{state.get('macro_context') or 'N/A'}
+{clip_text(state.get('macro_context') or 'N/A', sec)}
 
 === Filings / primary sources ===
-{state.get('filings_context') or 'N/A'}
+{clip_text(state.get('filings_context') or 'N/A', sec)}
 
 === Earnings transcripts / management ===
-{state.get('transcripts_context') or 'N/A'}
+{clip_text(state.get('transcripts_context') or 'N/A', sec)}
 
 === Fundamentals ===
-{state.get('fundamentals') or 'N/A'}
+{clip_text(state.get('fundamentals') or 'N/A', sec)}
 
 === Mutual fund / AMFI context ===
-{state.get('mf_context') or 'N/A'}
+{clip_text(state.get('mf_context') or 'N/A', sec)}
 
 === Risk assessment ===
-{state.get('risk_assessment') or 'N/A'}
+{clip_text(state.get('risk_assessment') or 'N/A', sec)}
 
 Write the final PruInsight multi-agent research note.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = llm.invoke(messages)
-    body = response.content or ""
+    response = invoke_chat(SYSTEM, user_msg, role="synthesizer")
+    body = response.content if isinstance(response.content, str) else str(response.content or "")
     if "disclaimer" not in body.lower():
         body = body.rstrip() + "\n" + DISCLAIMER
 

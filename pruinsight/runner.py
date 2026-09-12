@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 from pruinsight.graph import build_graph
 from pruinsight.report_export import enrich_result_with_sources
-from pruinsight.tracing import configure_tracing, run_config, tracing_status
+from pruinsight.tracing import configure_tracing, run_config
+
+PIPELINE_NODE_ORDER = [
+    "researcher",
+    "filings",
+    "transcripts",
+    "fundamentals",
+    "mf_context",
+    "macro",
+    "risk",
+    "synthesizer",
+]
 
 
 def initial_state(query: str, symbols: list[str] | None = None) -> dict[str, Any]:
@@ -49,3 +60,66 @@ def run_research(
     out = enrich_result_with_sources(result)
     out["langsmith"] = status
     return out
+
+
+def stream_research(
+    query: str,
+    symbols: list[str] | None = None,
+    *,
+    source: str = "streamlit",
+) -> Iterator[dict[str, Any]]:
+    """Yield pipeline progress events, then a final enriched result.
+
+    Events:
+        {"event": "start", "node": None, "done": [], "active": first node, ...}
+        {"event": "node_done", "node": <id>, "done": [...], "active": next|None, ...}
+        {"event": "done", "node": None, "result": <enriched state>, ...}
+    """
+    status = configure_tracing()
+    graph = build_graph()
+    config = run_config(query=query, symbols=symbols or [], source=source)
+    state: dict[str, Any] = initial_state(query, symbols)
+
+    yield {
+        "event": "start",
+        "node": None,
+        "done": [],
+        "active": PIPELINE_NODE_ORDER[0],
+        "state": state,
+        "langsmith": status,
+    }
+
+    done: list[str] = []
+    for update in graph.stream(state, config=config, stream_mode="updates"):
+        if not isinstance(update, dict):
+            continue
+        for node, payload in update.items():
+            if isinstance(payload, dict):
+                state = {**state, **payload}
+            if node not in done:
+                done.append(node)
+            nxt = None
+            if node in PIPELINE_NODE_ORDER:
+                idx = PIPELINE_NODE_ORDER.index(node)
+                if idx + 1 < len(PIPELINE_NODE_ORDER):
+                    nxt = PIPELINE_NODE_ORDER[idx + 1]
+            yield {
+                "event": "node_done",
+                "node": node,
+                "done": list(done),
+                "active": nxt,
+                "state": state,
+                "langsmith": status,
+            }
+
+    out = enrich_result_with_sources(state)
+    out["langsmith"] = status
+    yield {
+        "event": "done",
+        "node": None,
+        "done": list(done),
+        "active": None,
+        "result": out,
+        "state": out,
+        "langsmith": status,
+    }

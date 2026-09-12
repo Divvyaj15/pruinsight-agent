@@ -1,8 +1,6 @@
 """Fundamentals Analyst — Screener-style deep India fundamentals + peers."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import invoke_chat
 from pruinsight.state import AgentState
 from pruinsight.tools.deep_fundamentals import programmatic_deep_fundamentals
 
@@ -98,16 +96,12 @@ Earnings / management transcript brief (tone & guidance color):
 {(state.get('transcripts_context') or 'N/A')[:2000]}
 
 === Screener-style deep fundamentals pack (yfinance) ===
-{deep_pack[:28000]}
+{deep_pack[:6000]}
 
 Write the fundamentals analysis brief for the MF desk now.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = get_llm(temperature=0.1).invoke(messages)
+    response = invoke_chat(SYSTEM, user_msg, role="fundamentals")
     content = response.content if isinstance(response.content, str) else str(response.content)
 
     return {

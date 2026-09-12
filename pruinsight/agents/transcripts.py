@@ -1,8 +1,6 @@
 """Earnings transcripts agent — management tone & Q&A via search + RAG."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import invoke_chat
 from pruinsight.state import AgentState
 from pruinsight.tools.transcripts_tools import programmatic_transcripts_brief
 
@@ -42,16 +40,12 @@ Prior filings brief (short):
 {(state.get('filings_context') or 'N/A')[:1200]}
 
 === Raw transcript pipeline output ===
-{raw[:28000]}
+{raw[:6000]}
 
 Write the earnings transcript / management commentary brief now.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = get_llm(temperature=0.15).invoke(messages)
+    response = invoke_chat(SYSTEM, user_msg, role="transcripts")
     content = response.content if isinstance(response.content, str) else str(response.content)
     return {
         "transcripts_context": content,

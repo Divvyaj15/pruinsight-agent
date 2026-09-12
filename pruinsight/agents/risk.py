@@ -1,6 +1,7 @@
 """Risk Assessor agent — downside, concentration, and process risks."""
 
 from pruinsight.agents.tool_loop import run_with_tools
+from pruinsight.llm import clip_text
 from pruinsight.state import AgentState
 from pruinsight.tools.market_tools import get_index_snapshot, get_price_history
 
@@ -30,26 +31,27 @@ RISK_TOOLS = [get_price_history, get_index_snapshot]
 def risk_node(state: AgentState) -> dict:
     """Assess risks using prior research/fundamentals; optional vol/index tools."""
     symbols = state.get("symbols") or []
+    sec = 700
     user_msg = f"""Query: {state['query']}
 Symbols: {', '.join(symbols) or 'N/A'}
 
 === Market research ===
-{state.get('market_research') or 'N/A'}
+{clip_text(state.get('market_research') or 'N/A', sec)}
 
 === Filings / primary sources ===
-{state.get('filings_context') or 'N/A'}
+{clip_text(state.get('filings_context') or 'N/A', sec)}
 
 === Earnings transcripts / management commentary ===
-{state.get('transcripts_context') or 'N/A'}
+{clip_text(state.get('transcripts_context') or 'N/A', sec)}
 
 === Fundamentals ===
-{state.get('fundamentals') or 'N/A'}
+{clip_text(state.get('fundamentals') or 'N/A', sec)}
 
 === Mutual fund / AMFI context ===
-{state.get('mf_context') or 'N/A'}
+{clip_text(state.get('mf_context') or 'N/A', sec)}
 
 === Macro / RBI / global rates ===
-{state.get('macro_context') or 'N/A'}
+{clip_text(state.get('macro_context') or 'N/A', sec)}
 
 If symbols are present, you may call get_price_history (period 1y) and get_index_snapshot (INDIAVIX and NIFTY).
 Weight risks disclosed in filings highly. Use MF context for concentration / category / mandate risks.

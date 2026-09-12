@@ -74,8 +74,8 @@ It does this with **multiple specialized AI agents** that run **in sequence**, e
 ┌─────────────────────────────────────────────────────────────┐
 │  LangGraph StateGraph                                        │
 │                                                              │
-│  researcher → filings → transcripts → fundamentals           │
-│       → mf_context → macro → risk → synthesizer → END        │
+│  researcher → filings → fundamentals → mf_context            │
+│       → macro → risk → synthesizer → END                     │
 │                                                              │
 │  Shared: AgentState (TypedDict)                              │
 └──────────┬───────────────────────────────────────────────────┘
@@ -126,7 +126,7 @@ It does this with **multiple specialized AI agents** that run **in sequence**, e
 | **langchain** | Ecosystem glue |
 | **langchain-core** | Messages (`SystemMessage`, `HumanMessage`, `ToolMessage`), `@tool` |
 | **langchain-groq** | Chat model client for Groq-hosted LLMs |
-| **Groq API** | Hosted inference (default model: Llama scout instruct family) |
+| **Groq API** | Hosted inference (default model: `openai/gpt-oss-20b` for free-tier TPM) |
 
 ### 3.3 Search & discovery
 
@@ -156,11 +156,10 @@ Cascade implemented in `pruinsight/tools/search_providers.py`.
 | Chunk store | custom `FilingsStore` | In-memory corpus + metadata |
 | Retrieval | `rank-bm25` (BM25Okapi) | Keyword RAG without embeddings/vector DB |
 
-Three separate BM25 stores:
+Two separate stores:
 
 - company filings → `get_filings_store()`  
 - fund factsheets → `get_factsheet_store()`  
-- earnings transcripts → `get_transcript_store()`  
 
 ### 3.6 UI & export
 
@@ -187,7 +186,7 @@ Three separate BM25 stores:
 ```
 pruinsight-agent/
 ├── main.py                      # CLI entry
-├── streamlit_app.py             # Streamlit UI
+├── streamlit_app.py             # Streamlit research-desk UI
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -203,8 +202,10 @@ pruinsight-agent/
     ├── state.py                 # AgentState
     ├── llm.py                   # get_llm() → ChatGroq
     ├── graph.py                 # StateGraph wiring
-    ├── runner.py                # run_research() shared by CLI/UI
+    ├── runner.py                # run_research() + stream_research()
     ├── report_export.py         # sources appendix + PDF/MD
+    ├── viz_data.py              # KPI / tape / chart helpers
+    ├── ui_theme.py              # Research-desk CSS + HTML fragments
     │
     ├── rag/
     │   └── store.py             # BM25 FilingsStore + factories
@@ -239,7 +240,6 @@ Defined in `pruinsight/state.py` as a `TypedDict` passed through every node.
 | `symbols` | User / fundamentals | NSE tickers e.g. `["HDFCBANK"]` |
 | `market_research` | researcher | News / sector narrative |
 | `filings_context` | filings | Primary-source PDF brief |
-| `transcripts_context` | transcripts | Earnings call / management brief |
 | `fundamentals` | fundamentals | Valuation / quality brief |
 | `mf_context` | mf_context | AMFI schemes + factsheet brief |
 | `macro_context` | macro | RBI + India/global macro brief |
@@ -259,7 +259,6 @@ File: `pruinsight/graph.py`
 START
   → researcher
   → filings
-  → transcripts
   → fundamentals
   → mf_context
   → macro
@@ -308,44 +307,36 @@ Clear debugging, inspectable intermediate tabs in Streamlit, and predictable too
 - **Tools module:** `tools/filings_tools.py`  
 - **Store cleared each run** so Streamlit sessions don’t mix issuers.
 
-### 7.3 Transcripts Analyst (`agents/transcripts.py`)
-
-- **Job:** Management tone, guidance, Q&A themes from earnings calls.  
-- **Mechanism:** multi-search → ingest PDF/HTML → BM25 transcript store → RAG → LLM brief.  
-- **Tools module:** `tools/transcripts_tools.py`  
-- **Writes:** `transcripts_context`  
-- **Caveat:** paywalls / JS-only pages common.
-
-### 7.4 Fundamentals Analyst (`agents/fundamentals.py`)
+### 7.3 Fundamentals Analyst (`agents/fundamentals.py`)
 
 - **Job:** Quantitative company view (Screener-style).  
 - **Mechanism:** deterministic `programmatic_deep_fundamentals()` pack then LLM interpretation.  
 - **Tools module:** `tools/deep_fundamentals.py` (ratios, growth, quarterly, holders, default peers).  
-- **Reads:** market research + filings + transcripts  
+- **Reads:** market research + filings  
 - **Writes:** `fundamentals`  
 - **Extra:** symbol alias map (e.g. “HDFC Bank” → `HDFCBANK`).
 
-### 7.5 MF Context (`agents/mf_context.py`)
+### 7.4 MF Context (`agents/mf_context.py`)
 
 - **Job:** Mutual-fund desk lens.  
 - **Data:** AMFI `NAVAll.txt` + optional factsheet PDF RAG  
 - **Mechanism:** `programmatic_mf_brief()` then LLM synthesis  
 - **Writes:** `mf_context`
 
-### 7.6 Macro Analyst (`agents/macro.py`)
+### 7.5 Macro Analyst (`agents/macro.py`)
 
 - **Job:** Rates / FX / oil / RBI policy regime.  
 - **Data:** India market proxies (yfinance), multi-provider RBI search, FRED or Yahoo global  
 - **Writes:** `macro_context`
 
-### 7.7 Risk Assessor (`agents/risk.py`)
+### 7.6 Risk Assessor (`agents/risk.py`)
 
 - **Job:** Downside, thesis kills, portfolio construction risks.  
 - **Tools (optional):** `get_price_history`, `get_index_snapshot`  
-- **Reads:** all prior briefs (incl. transcripts)  
+- **Reads:** all prior briefs  
 - **Writes:** `risk_assessment`
 
-### 7.8 Report Synthesizer (`agents/synthesizer.py`)
+### 7.7 Report Synthesizer (`agents/synthesizer.py`)
 
 - **Job:** Merge everything into one institutional note.  
 - **Tools:** none  
@@ -397,15 +388,6 @@ Used by agents that need multi-round tool calling:
 | `ingest_filing_pdf` | Download + chunk |
 | `query_filings_rag` | BM25 retrieve |
 | `list_ingested_filings` | Store summary |
-
-### Earnings transcripts
-
-| Tool | Role |
-|------|------|
-| `search_earnings_transcripts` | Find concall / earnings transcripts |
-| `ingest_transcript_document` | PDF or HTML → transcript store |
-| `query_transcripts_rag` | BM25 retrieve guidance / Q&A |
-| `list_ingested_transcripts` | Store summary |
 
 ### AMFI + factsheets
 
@@ -473,7 +455,7 @@ Search URLs (cascade)
 **Limits:** scanned/image PDFs yield little text; exchange sites may block bots; page caps mean partial annual reports.
 
 ---
-
+x
 ## 11. AMFI mutual fund data
 
 - Download: `https://portal.amfiindia.com/spages/NAVAll.txt`  
@@ -504,7 +486,7 @@ File: `pruinsight/llm.py`
 
 ```python
 ChatGroq(
-    model="meta-llama/llama-4-scout-17b-16e-instruct",  # default
+    model="openai/gpt-oss-20b",  # default (free-tier friendly)
     temperature=...,
     api_key=os.getenv("GROQ_API_KEY"),
 )
@@ -558,14 +540,18 @@ python main.py "..." -s TCS INFY --pdf out.pdf
 
 ### Streamlit (`streamlit_app.py`)
 
-- Query + symbols form  
-- Example presets  
-- Sidebar: keys status, pipeline, tools  
-- Tabs: Market, Filings, Fundamentals, MF/AMFI, Macro, Risk, Pipeline  
-- Final note + data sources expander  
-- Download **.md** and **.pdf**
+Research-desk UI (`pruinsight/ui_theme.py` + `.streamlit/config.toml`):
 
-Both call the same `pruinsight.runner.run_research()`.
+- Navy/gold masthead with live index tape (Nifty, Sensex, India VIX, USD/INR)  
+- Query + NSE symbols composer and desk presets  
+- Live 8-agent stepper via `runner.stream_research()`  
+- **Overview** — KPI cards, 52-week range, executive snapshot  
+- **Charts** — Altair price history + peer bars  
+- **Research note** — section tabs or single scroll  
+- **Workpapers** — Ready/Thin status + each agent brief  
+- **Export & sources** — Markdown, PDF, plain text, data-sources appendix  
+
+CLI still calls `pruinsight.runner.run_research()`. The UI streams the same graph.
 
 ---
 
@@ -631,14 +617,13 @@ Full tutorial: [DOCKER_LEARNING.md](./DOCKER_LEARNING.md).
 2. `run_research` builds graph and `invoke`s initial state.  
 3. **Researcher** searches web/news, optional company news & indices → `market_research`.  
 4. **Filings** searches PDFs, ingests 1–2 docs, RAG, LLM brief → `filings_context`.  
-5. **Transcripts** searches earnings calls, ingests PDF/HTML, RAG → `transcripts_context`.  
-6. **Fundamentals** Screener-style deep pack + LLM → `fundamentals`.  
-7. **MF context** loads AMFI NAVs, optional factsheet RAG → `mf_context`.  
-8. **Macro** builds India + global + RBI pack → `macro_context`.  
-9. **Risk** synthesizes risks from all prior text (+ optional vol tools) → `risk_assessment`.  
-10. **Synthesizer** writes full IC-style note → `final_report`.  
-11. **Runner** appends **Data sources** (providers + ingested PDF/transcript URLs).  
-12. UI/CLI displays report; optional Markdown/PDF download.  
+5. **Fundamentals** pulls yfinance metrics/history/peers → `fundamentals`.  
+6. **MF context** loads AMFI NAVs, optional factsheet RAG → `mf_context`.  
+7. **Macro** builds India + global + RBI pack → `macro_context`.  
+8. **Risk** synthesizes risks from all prior text (+ optional vol tools) → `risk_assessment`.  
+9. **Synthesizer** writes full IC-style note → `final_report`.  
+10. **Runner** appends **Data sources** (providers + ingested PDF URLs).  
+11. UI/CLI displays report; optional Markdown/PDF download.  
 
 Typical wall time: **tens of seconds to a few minutes** (many LLM + network calls).
 
@@ -702,7 +687,7 @@ User query + symbols
 | 3 | RBI / FRED macro | Done |
 | 4 | Serper / DuckDuckGo search fallback | Done |
 | 5 | Screener-style deep India fundamentals | Done |
-| 6 | Earnings transcripts | Done |
+| 6 | Earnings transcripts | Planned |
 
 ### Design choices
 

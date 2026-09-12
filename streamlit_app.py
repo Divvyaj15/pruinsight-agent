@@ -1,5 +1,5 @@
 """
-PruInsight Streamlit frontend — dashboard + multi-agent research note.
+PruInsight Streamlit frontend — mutual-fund research desk.
 
 Run:
     .venv\\Scripts\\python.exe -m streamlit run streamlit_app.py
@@ -14,52 +14,43 @@ from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 
+from pruinsight.ui_theme import (
+    THEME_CSS,
+    kpi_cards_html,
+    masthead_html,
+    note_masthead_html,
+    pipeline_html,
+    query_bar_html,
+    sidebar_brand_html,
+    status_grid_html,
+    workpaper_pills_html,
+)
+
 load_dotenv()
 
 st.set_page_config(
-    page_title="PruInsight | Multi-Agent Research",
-    page_icon="📊",
+    page_title="PruInsight · Research Desk",
+    page_icon="◈",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={
+        "Get Help": None,
+        "Report a bug": None,
+        "About": "PruInsight — multi-agent equity research desk. Educational demo only.",
+    },
 )
 
-st.markdown(
-    """
-    <style>
-    .block-container { padding-top: 1.25rem; max-width: 1200px; }
-    .pru-badge {
-        display: inline-block;
-        padding: 0.2rem 0.65rem;
-        border-radius: 999px;
-        background: #e8f1ff;
-        color: #1a4d8f;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-right: 0.35rem;
-    }
-    .pru-muted { color: #6b7280; font-size: 0.9rem; }
-    .section-card {
-        border: 1px solid #e5e7eb;
-        border-radius: 10px;
-        padding: 0.75rem 1rem;
-        margin-bottom: 0.5rem;
-        background: #fafafa;
-    }
-    div[data-testid="stStatusWidget"] { visibility: hidden; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 
 PIPELINE_STEPS = [
-    ("researcher", "Market Researcher", "Web/news search, company headlines, indices"),
-    ("filings", "Filings Analyst", "SEBI/BSE/NSE/IR PDFs + BM25 RAG"),
-    ("transcripts", "Transcripts Analyst", "Earnings call transcripts + BM25 RAG"),
-    ("fundamentals", "Fundamentals Analyst", "Screener-style ratios, quarterly, holders, peers"),
-    ("mf_context", "MF Context (AMFI)", "AMFI NAVs + fund factsheet RAG"),
-    ("macro", "Macro Analyst", "RBI policy + India/global macro (FRED optional)"),
-    ("risk", "Risk Assessor", "Downside risks + vol / VIX context"),
-    ("synthesizer", "Report Synthesizer", "Final MF-desk note"),
+    ("researcher", "Market", "Web/news search, company headlines, indices"),
+    ("filings", "Filings", "SEBI/BSE/NSE/IR PDFs + BM25 RAG"),
+    ("transcripts", "Transcripts", "Earnings call transcripts + BM25 RAG"),
+    ("fundamentals", "Fundamentals", "Screener-style ratios, quarterly, holders, peers"),
+    ("mf_context", "MF / AMFI", "AMFI NAVs + fund factsheet RAG"),
+    ("macro", "Macro", "RBI policy + India/global macro (FRED optional)"),
+    ("risk", "Risk", "Downside risks + vol / VIX context"),
+    ("synthesizer", "Synthesizer", "Final MF-desk note"),
 ]
 
 TOOL_CATALOG = [
@@ -71,32 +62,36 @@ TOOL_CATALOG = [
 ]
 
 EXAMPLES = {
-    "HDFC Bank (MF view)": {
+    "HDFC Bank": {
         "query": "Latest insights on HDFC Bank for mutual fund perspective",
         "symbols": "HDFCBANK",
+        "blurb": "Private-bank franchise, asset quality, and MF sizing.",
     },
-    "Reliance large-cap": {
+    "Reliance": {
         "query": "Outlook on Reliance Industries for large-cap funds",
         "symbols": "RELIANCE",
+        "blurb": "Energy-to-retail conglomerate for large-cap desks.",
     },
-    "Private banks compare": {
+    "Private banks": {
         "query": "Compare private sector banks for diversified equity funds",
         "symbols": "HDFCBANK, ICICIBANK, KOTAKBANK",
+        "blurb": "Side-by-side HDFC, ICICI, and Kotak.",
     },
     "IT majors": {
         "query": "TCS vs Infosys — mutual fund holding considerations",
         "symbols": "TCS, INFY",
+        "blurb": "Quality IT compounders and relative valuation.",
     },
 }
 
 AGENT_FIELDS = [
-    ("market_research", "Market Research", "📰"),
-    ("filings_context", "Filings", "📄"),
-    ("transcripts_context", "Transcripts", "🎙️"),
-    ("fundamentals", "Fundamentals", "📈"),
-    ("mf_context", "MF / AMFI", "🏦"),
-    ("macro_context", "Macro", "🌍"),
-    ("risk_assessment", "Risk", "⚠️"),
+    ("market_research", "Market", "researcher"),
+    ("filings_context", "Filings", "filings"),
+    ("transcripts_context", "Transcripts", "transcripts"),
+    ("fundamentals", "Fundamentals", "fundamentals"),
+    ("mf_context", "MF / AMFI", "mf_context"),
+    ("macro_context", "Macro", "macro"),
+    ("risk_assessment", "Risk", "risk"),
 ]
 
 
@@ -130,14 +125,34 @@ def _keys_status() -> dict[str, bool]:
     }
 
 
+def _langsmith_status() -> dict:
+    try:
+        from pruinsight.tracing import configure_tracing, tracing_status
+
+        configure_tracing()
+        return tracing_status()
+    except Exception:
+        return {"enabled": False, "has_api_key": False, "project": "pruinsight-agent"}
+
+
 @st.cache_resource(show_spinner=False)
-def _get_runner():
+def _get_stream_runner():
     from pruinsight.tracing import configure_tracing
 
     configure_tracing()
-    from pruinsight.runner import run_research
+    from pruinsight.runner import stream_research
 
-    return run_research
+    return stream_research
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_tape():
+    from pruinsight.viz_data import fetch_index_tape
+
+    try:
+        return fetch_index_tape()
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -162,55 +177,132 @@ def _cached_peers(symbols_tuple: tuple[str, ...]):
     return fetch_peer_metrics_df(universe), universe
 
 
+def _styled_line_chart(chart_df):
+    import altair as alt
+
+    long = chart_df.reset_index()
+    date_col = long.columns[0]
+    long = long.rename(columns={date_col: "Date"})
+    long = long.melt("Date", var_name="Symbol", value_name="Close").dropna()
+    if long.empty:
+        return None
+    palette = ["#0B1C2C", "#C4A35A", "#2A6F7F", "#8C4A3A"]
+    return (
+        alt.Chart(long)
+        .mark_line(strokeWidth=2.2)
+        .encode(
+            x=alt.X("Date:T", title=None, axis=alt.Axis(grid=False, labelColor="#6B7785")),
+            y=alt.Y(
+                "Close:Q",
+                title="Close (₹)",
+                scale=alt.Scale(zero=False),
+                axis=alt.Axis(grid=True, gridColor="#E4DDD0", labelColor="#6B7785", titleColor="#15202B"),
+            ),
+            color=alt.Color(
+                "Symbol:N",
+                scale=alt.Scale(range=palette),
+                legend=alt.Legend(orient="top", title=None, labelColor="#15202B"),
+            ),
+            tooltip=[
+                alt.Tooltip("Date:T", title="Date"),
+                "Symbol:N",
+                alt.Tooltip("Close:Q", title="Close", format=",.2f"),
+            ],
+        )
+        .properties(height=320)
+        .configure_view(stroke=None)
+        .configure_axis(domainColor="#C4B8A0")
+    )
+
+
+def _styled_bar_chart(plot_df, metric: str):
+    import altair as alt
+
+    df = plot_df.reset_index()
+    if df.empty:
+        return None
+    x_name = df.columns[0]
+    return (
+        alt.Chart(df)
+        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#C4A35A")
+        .encode(
+            x=alt.X(f"{x_name}:N", title=None, sort="-y", axis=alt.Axis(labelColor="#15202B", labelAngle=0)),
+            y=alt.Y(
+                f"{metric}:Q",
+                title=metric,
+                axis=alt.Axis(grid=True, gridColor="#E4DDD0", labelColor="#6B7785", titleColor="#15202B"),
+            ),
+            tooltip=[x_name, alt.Tooltip(f"{metric}:Q", format=",.2f")],
+        )
+        .properties(height=320)
+        .configure_view(stroke=None)
+        .configure_axis(domainColor="#C4B8A0")
+    )
+
+
 def _render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("### PruInsight")
-        st.caption("Multi-agent equity research for a mutual-fund desk (demo).")
+        st.markdown(sidebar_brand_html(), unsafe_allow_html=True)
+        st.caption("Equity research for a mutual-fund desk. Educational demo.")
 
         keys = _keys_status()
-        st.markdown("**API keys / search**")
-        st.write(("✅" if keys["groq"] else "❌") + " `GROQ_API_KEY`")
-        st.write(("✅" if keys["tavily"] else "⚪") + " `TAVILY_API_KEY`")
-        st.write(("✅" if keys["serper"] else "⚪") + " `SERPER_API_KEY`")
-        st.write(("✅" if keys["duckduckgo"] else "❌") + " DuckDuckGo (`ddgs`)")
-        st.write(("✅" if keys["fred"] else "⚪") + " `FRED_API_KEY`")
-
-        try:
-            from pruinsight.tracing import configure_tracing, tracing_status
-
-            configure_tracing()
-            ls = tracing_status()
-        except Exception:
-            ls = {"enabled": False, "has_api_key": False, "project": "pruinsight-agent"}
-        st.write(
-            ("✅" if ls.get("enabled") else "⚪")
-            + " LangSmith tracing"
-            + (f" (`{ls.get('project')}`)" if ls.get("enabled") else " — set `LANGSMITH_API_KEY`")
+        ls = _langsmith_status()
+        st.markdown("**System status**")
+        st.markdown(
+            status_grid_html(keys, bool(ls.get("enabled"))),
+            unsafe_allow_html=True,
         )
         if ls.get("enabled"):
-            st.caption("Traces → https://smith.langchain.com")
-
+            st.caption(f"Traces · `{ls.get('project')}` · smith.langchain.com")
         if not keys["groq"]:
             st.warning("Add `GROQ_API_KEY` to `.env` and restart.")
         else:
-            st.caption("Search order: Tavily → Serper → DuckDuckGo")
+            st.caption("Search cascade: Tavily → Serper → DuckDuckGo")
+
+        try:
+            from pruinsight.llm import model_roster
+
+            with st.expander("LLM models by role"):
+                for role, mid in model_roster().items():
+                    st.caption(f"**{role}:** `{mid}`")
+        except Exception:
+            pass
 
         st.divider()
-        st.markdown("**Pipeline**")
-        for i, (_, name, desc) in enumerate(PIPELINE_STEPS, 1):
-            st.caption(f"{i}. **{name}** — {desc}")
+        st.markdown("**Eight-agent pipeline**")
+        st.markdown(
+            pipeline_html(PIPELINE_STEPS),
+            unsafe_allow_html=True,
+        )
+        with st.expander("What each agent does"):
+            for i, (_, name, desc) in enumerate(PIPELINE_STEPS, 1):
+                st.caption(f"{i:02d}  **{name}** — {desc}")
 
         with st.expander("Research tools"):
             for tool_name, tool_desc in TOOL_CATALOG:
                 st.caption(f"`{tool_name}` — {tool_desc}")
 
         st.divider()
-        st.markdown("**Examples**")
-        choice = st.selectbox("Load example", ["—"] + list(EXAMPLES.keys()))
-        if choice != "—" and st.button("Apply example", use_container_width=True):
+        st.markdown("**Desk presets**")
+        choice = st.selectbox("Load a starting brief", ["—"] + list(EXAMPLES.keys()))
+        if choice != "—" and st.button("Apply preset", use_container_width=True):
             ex = EXAMPLES[choice]
             st.session_state["query_input"] = ex["query"]
             st.session_state["symbols_input"] = ex["symbols"]
+            st.rerun()
+
+        if st.session_state.get("last_result") and st.button(
+            "Clear last note", use_container_width=True
+        ):
+            for k in (
+                "last_result",
+                "last_query",
+                "last_symbols",
+                "last_run_at",
+                "show_steps",
+                "show_viz",
+            ):
+                st.session_state.pop(k, None)
             st.rerun()
 
         st.divider()
@@ -219,53 +311,63 @@ def _render_sidebar() -> None:
 
 def _render_kpi_dashboard(symbols: list[str]) -> None:
     if not symbols:
-        st.info("Pass NSE symbols to show live KPI cards and charts.")
+        st.info("Pass NSE symbols on the brief to unlock live KPI cards and charts.")
         return
 
-    from pruinsight.viz_data import format_inr_cr, format_num
+    from pruinsight.viz_data import day_change_pct, format_inr_cr, format_num
 
-    st.subheader("Market snapshot")
-    st.caption("Live data via yfinance (NSE) — independent of the LLM narrative.")
-
+    cards = []
     for sym in symbols[:4]:
         try:
             snap = _cached_snapshot(sym)
         except Exception as e:
             st.warning(f"Could not load snapshot for {sym}: {e}")
             continue
-
-        st.markdown(f"##### {snap['name']} (`{snap['symbol']}`)")
-        st.caption(f"{snap['sector']} · {snap['industry']}")
-
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("Price", format_num(snap["price"], decimals=2) if snap["price"] else "N/A")
-        c2.metric("P/E (TTM)", format_num(snap["pe"]))
-        c3.metric("P/B", format_num(snap["pb"]))
-        c4.metric("ROE", format_num(snap["roe"], "%", 1))
-        c5.metric("Div yield", format_num(snap["div_yield"], "%", 2))
-        c6.metric("Mkt cap", format_inr_cr(snap["market_cap"]))
-
-        c7, c8, c9, c10 = st.columns(4)
-        c7.metric("vs 52w high", format_num(snap["vs_high_pct"], "%", 1))
-        c8.metric("vs 52w low", format_num(snap["vs_low_pct"], "%", 1))
-        c9.metric("Beta", format_num(snap["beta"]))
-        c10.metric(
-            "Analyst tgt",
-            format_num(snap["target_mean"], decimals=2) if snap["target_mean"] else "N/A",
+        chg = day_change_pct(snap)
+        lo, hi, px = snap.get("low_52w"), snap.get("high_52w"), snap.get("price")
+        pos = None
+        if lo and hi and px and hi > lo:
+            pos = (px - lo) / (hi - lo)
+        cards.append(
+            {
+                "symbol": snap["symbol"],
+                "name": snap["name"],
+                "sector": snap.get("sector") or "",
+                "price_s": f"₹{format_num(snap['price'], decimals=2)}"
+                if snap.get("price")
+                else "N/A",
+                "chg": chg,
+                "metrics": [
+                    ("P/E", format_num(snap.get("pe"))),
+                    ("P/B", format_num(snap.get("pb"))),
+                    ("ROE", format_num(snap.get("roe"), "%", 1)),
+                    ("Mkt cap", format_inr_cr(snap.get("market_cap"))),
+                    ("Div yld", format_num(snap.get("div_yield"), "%", 2)),
+                    ("Beta", format_num(snap.get("beta"))),
+                    ("vs 52w hi", format_num(snap.get("vs_high_pct"), "%", 1)),
+                    ("vs 52w lo", format_num(snap.get("vs_low_pct"), "%", 1)),
+                ],
+                "range_pos": pos,
+                "low_s": format_num(lo, decimals=2) if lo else "—",
+                "high_s": format_num(hi, decimals=2) if hi else "—",
+                "tgt_s": format_num(snap.get("target_mean"), decimals=2)
+                if snap.get("target_mean")
+                else None,
+            }
         )
+    if cards:
+        st.markdown(kpi_cards_html(cards), unsafe_allow_html=True)
 
 
 def _render_charts(symbols: list[str]) -> None:
     if not symbols:
         return
 
-    st.subheader("Visualizations")
     left, right = st.columns(2)
-
     with left:
-        st.markdown("**Price history (1Y)**")
+        st.markdown("**Price history**")
         period = st.selectbox(
-            "Period",
+            "Lookback",
             ["6mo", "1y", "2y", "5y"],
             index=1,
             key="hist_period",
@@ -277,12 +379,14 @@ def _render_charts(symbols: list[str]) -> None:
                 if not df.empty:
                     frames.append(df)
             if frames:
-                import pandas as pd
-
                 chart_df = frames[0]
                 for extra in frames[1:]:
                     chart_df = chart_df.join(extra, how="outer")
-                st.line_chart(chart_df, height=320)
+                chart = _styled_line_chart(chart_df)
+                if chart is not None:
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.caption("No price history available.")
             else:
                 st.caption("No price history available.")
         except Exception as e:
@@ -305,27 +409,13 @@ def _render_charts(symbols: list[str]) -> None:
                 if plot_df.empty:
                     st.caption(f"No data for {metric}.")
                 else:
-                    st.bar_chart(plot_df, height=320)
+                    chart = _styled_bar_chart(plot_df, metric)
+                    if chart is not None:
+                        st.altair_chart(chart, use_container_width=True)
                 with st.expander("Peer table"):
                     st.dataframe(peer_df, use_container_width=True, hide_index=True)
         except Exception as e:
             st.caption(f"Peer chart unavailable: {e}")
-
-    # 52w position as a simple gauge-like bar for primary symbol
-    try:
-        primary = symbols[0]
-        snap = _cached_snapshot(primary)
-        lo, hi, px = snap["low_52w"], snap["high_52w"], snap["price"]
-        if lo and hi and px and hi > lo:
-            st.markdown(f"**52-week range · {primary}**")
-            pos = (px - lo) / (hi - lo)
-            st.progress(min(max(pos, 0.0), 1.0))
-            a, b, c = st.columns(3)
-            a.caption(f"Low ₹{lo:,.2f}")
-            b.caption(f"Now ₹{px:,.2f} ({pos*100:.0f}% of range)")
-            c.caption(f"High ₹{hi:,.2f}")
-    except Exception:
-        pass
 
 
 def _render_report_structured(report: str) -> None:
@@ -333,61 +423,55 @@ def _render_report_structured(report: str) -> None:
 
     sections = parse_report_sections(report)
     if not sections:
+        st.markdown('<div class="note-body-anchor"></div>', unsafe_allow_html=True)
         st.markdown(report)
         return
 
-    # Highlight executive summary / first section if present
-    exec_idx = next(
-        (i for i, (h, _) in enumerate(sections) if "executive" in h.lower() or i == 0),
-        0,
-    )
-    title_h, title_b = sections[0]
-    if not title_h.lower().startswith("executive") and len(sections) > 1:
-        st.markdown(f"### {title_h}")
-        if title_b:
-            st.markdown(title_b)
-
-    # Section navigator
-    labels = [h for h, _ in sections]
-    tab_labels = []
-    for h in labels:
-        short = h if len(h) <= 28 else h[:25] + "…"
-        tab_labels.append(short)
-
-    tabs = st.tabs(tab_labels)
+    labels = [h if len(h) <= 28 else h[:25] + "…" for h, _ in sections]
+    tabs = st.tabs(labels)
     for tab, (heading, body) in zip(tabs, sections):
         with tab:
+            st.markdown('<div class="note-body-anchor"></div>', unsafe_allow_html=True)
             st.markdown(f"#### {heading}")
             if body:
                 st.markdown(body)
             else:
                 st.caption("_Empty section_")
 
-    with st.expander("Full report (single page)", expanded=False):
+    with st.expander("Full note (single page)", expanded=False):
         st.markdown(report)
 
 
 def _render_agent_intermediates(result: dict, show_steps: bool) -> None:
     if not show_steps:
         return
-    st.subheader("Agent workpapers")
-    st.caption("Raw intermediate briefs from each specialized agent.")
 
-    # Compact status row
-    cols = st.columns(len(AGENT_FIELDS))
-    for col, (key, label, icon) in zip(cols, AGENT_FIELDS):
+    st.markdown("### Agent workpapers")
+    st.caption("Intermediate briefs written by each specialist before synthesis.")
+
+    pills = []
+    for key, label, _ in AGENT_FIELDS:
         text = result.get(key) or ""
-        ok = len(text.strip()) > 40
-        col.metric(f"{icon} {label}", "Ready" if ok else "Thin/empty")
+        pills.append((label, len(text.strip()) > 40))
+    synth = result.get("final_report") or ""
+    pills.append(("Note", len(synth.strip()) > 80))
+    st.markdown(workpaper_pills_html(pills), unsafe_allow_html=True)
 
-    tabs = st.tabs([f"{icon} {label}" for _, label, icon in AGENT_FIELDS] + ["Pipeline"])
+    tabs = st.tabs([label for _, label, _ in AGENT_FIELDS] + ["Pipeline"])
     for i, (key, label, _) in enumerate(AGENT_FIELDS):
         with tabs[i]:
-            content = result.get(key) or "_No output_"
+            content = result.get(key) or "_No output from this agent._"
             st.markdown(content)
     with tabs[-1]:
+        st.markdown(
+            pipeline_html(
+                PIPELINE_STEPS,
+                done=[k for k, _, _ in PIPELINE_STEPS],
+            ),
+            unsafe_allow_html=True,
+        )
         for i, (_, name, desc) in enumerate(PIPELINE_STEPS, 1):
-            st.markdown(f"{i}. **{name}** — {desc}")
+            st.markdown(f"**{i:02d} · {name}** — {desc}")
 
 
 def _render_downloads(report: str) -> None:
@@ -406,7 +490,7 @@ def _render_downloads(report: str) -> None:
     d1, d2, d3 = st.columns(3)
     with d1:
         st.download_button(
-            "Download Markdown (.md)",
+            "Markdown",
             data=report,
             file_name=f"{base}.md",
             mime="text/markdown",
@@ -415,7 +499,7 @@ def _render_downloads(report: str) -> None:
     with d2:
         if pdf_bytes:
             st.download_button(
-                "Download PDF (.pdf)",
+                "PDF",
                 data=pdf_bytes,
                 file_name=f"{base}.pdf",
                 mime="application/pdf",
@@ -426,10 +510,9 @@ def _render_downloads(report: str) -> None:
             if pdf_error:
                 st.caption(pdf_error)
     with d3:
-        # Strip markdown-ish for a plain text export
         plain = re.sub(r"[#*_`]", "", report)
         st.download_button(
-            "Download plain text (.txt)",
+            "Plain text",
             data=plain,
             file_name=f"{base}.txt",
             mime="text/plain",
@@ -437,58 +520,177 @@ def _render_downloads(report: str) -> None:
         )
 
 
+def _render_landing() -> None:
+    st.markdown("#### Start from a desk preset")
+    cols = st.columns(4)
+    for col, (name, ex) in zip(cols, EXAMPLES.items()):
+        with col:
+            st.markdown(
+                f"<div class='hero-card'><h4>{name}</h4>"
+                f"<p>{ex['blurb']}</p>"
+                f"<p style='margin-top:0.45rem;font-size:0.78rem;color:#6B7785'>"
+                f"<b>{ex['symbols']}</b></p></div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(f"Load {name}", key=f"preset_{name}", use_container_width=True):
+                st.session_state["query_input"] = ex["query"]
+                st.session_state["symbols_input"] = ex["symbols"]
+                st.rerun()
+
+    st.markdown("#### How a run works")
+    st.markdown(
+        pipeline_html(PIPELINE_STEPS),
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            "<div class='hero-card'><h4>Live market layer</h4>"
+            "<p>KPI cards, 52-week range, and peer charts come from Yahoo Finance — "
+            "independent of the LLM narrative.</p></div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            "<div class='hero-card'><h4>Primary-source agents</h4>"
+            "<p>Filings, transcripts, and fund factsheets are searched, ingested, "
+            "and retrieved with BM25 before the note is written.</p></div>",
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            "<div class='hero-card'><h4>MF-desk synthesis</h4>"
+            "<p>The last agent writes a structured note with horizon, sizing, "
+            "monitoring, and a disclaimer — exportable as Markdown or PDF.</p></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _run_pipeline(query: str, symbols: list[str], show_steps: bool, show_viz: bool) -> None:
+    stream_research = _get_stream_runner()
+    pipe_slot = st.empty()
+    status_slot = st.empty()
+    labels = {k: n for k, n, _ in PIPELINE_STEPS}
+
+    pipe_slot.markdown(
+        pipeline_html(PIPELINE_STEPS, done=[], active="researcher"),
+        unsafe_allow_html=True,
+    )
+    status_slot.info("Opening the eight-agent graph… typically 1–3 minutes.")
+
+    result = None
+    try:
+        for evt in stream_research(query, symbols, source="streamlit"):
+            kind = evt.get("event")
+            if kind == "start":
+                pipe_slot.markdown(
+                    pipeline_html(PIPELINE_STEPS, done=[], active=evt.get("active")),
+                    unsafe_allow_html=True,
+                )
+                status_slot.info("Market researcher is gathering news and headlines…")
+            elif kind == "node_done":
+                node = evt.get("node")
+                nxt = evt.get("active")
+                pipe_slot.markdown(
+                    pipeline_html(
+                        PIPELINE_STEPS,
+                        done=evt.get("done") or [],
+                        active=nxt,
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if nxt:
+                    status_slot.info(
+                        f"**{labels.get(node, node)}** complete · running **{labels.get(nxt, nxt)}**…"
+                    )
+                else:
+                    status_slot.info("Synthesizing the research note…")
+            elif kind == "done":
+                result = evt.get("result")
+    except Exception as e:
+        pipe_slot.empty()
+        status_slot.empty()
+        st.error(f"Pipeline failed: {e}")
+        with st.expander("Error details"):
+            st.exception(e)
+        return
+
+    if not result:
+        pipe_slot.empty()
+        status_slot.error("Pipeline finished without a result.")
+        return
+
+    pipe_slot.markdown(
+        pipeline_html(
+            PIPELINE_STEPS,
+            done=[k for k, _, _ in PIPELINE_STEPS],
+            active=None,
+        ),
+        unsafe_allow_html=True,
+    )
+    ls = (result or {}).get("langsmith") or {}
+    if ls.get("enabled"):
+        status_slot.success(
+            f"Research note ready · LangSmith project `{ls.get('project')}`"
+        )
+    else:
+        status_slot.success("Research note ready.")
+
+    st.session_state["last_result"] = result
+    st.session_state["last_query"] = query
+    st.session_state["last_symbols"] = symbols
+    st.session_state["show_steps"] = show_steps
+    st.session_state["show_viz"] = show_viz
+    st.session_state["last_run_at"] = datetime.now().strftime("%d %b %Y · %H:%M")
+
+
 def main() -> None:
     _render_sidebar()
 
-    st.title("PruInsight Research Desk")
+    tape = _cached_tape()
+    st.markdown(masthead_html(tape), unsafe_allow_html=True)
     st.markdown(
-        '<span class="pru-badge">LangGraph</span>'
-        '<span class="pru-badge">Groq</span>'
-        '<span class="pru-badge">Tavily</span>'
-        '<span class="pru-badge">yfinance</span>'
-        '<span class="pru-badge">AMFI</span>',
+        "<p class='pru-lede'>Compose a brief. Eight specialist agents gather "
+        "<strong>news, filings, transcripts, fundamentals, AMFI context, macro, and risk</strong>, "
+        "then synthesize a mutual-fund desk note.</p>",
         unsafe_allow_html=True,
-    )
-    st.write(
-        "Multi-agent pipeline with **KPIs**, **charts**, and a **sectioned research note**."
     )
 
     if "query_input" not in st.session_state:
-        st.session_state["query_input"] = EXAMPLES["HDFC Bank (MF view)"]["query"]
+        st.session_state["query_input"] = EXAMPLES["HDFC Bank"]["query"]
     if "symbols_input" not in st.session_state:
-        st.session_state["symbols_input"] = EXAMPLES["HDFC Bank (MF view)"]["symbols"]
+        st.session_state["symbols_input"] = EXAMPLES["HDFC Bank"]["symbols"]
 
     with st.form("research_form", clear_on_submit=False):
         query = st.text_area(
-            "Research query",
+            "Research question",
             key="query_input",
-            height=90,
+            height=92,
             placeholder="e.g. Latest insights on HDFC Bank for mutual fund perspective",
         )
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3 = st.columns([2.2, 1, 1])
         with col1:
             symbols_raw = st.text_input(
-                "NSE symbols (comma-separated)",
+                "NSE symbols",
                 key="symbols_input",
                 placeholder="HDFCBANK, ICICIBANK",
-                help="Bare tickers without .NS — enables KPIs & charts",
+                help="Bare tickers without .NS — unlocks KPI cards and charts",
             )
         with col2:
-            show_steps = st.checkbox("Show agent workpapers", value=True)
+            show_steps = st.checkbox("Agent workpapers", value=True)
         with col3:
-            show_viz = st.checkbox("Show charts & KPIs", value=True)
+            show_viz = st.checkbox("Charts & KPIs", value=True)
 
         submitted = st.form_submit_button(
-            "Generate research note",
+            "Run research pipeline",
             type="primary",
             use_container_width=True,
         )
 
     if submitted:
         if not query or not query.strip():
-            st.error("Please enter a research query.")
+            st.error("Please enter a research question.")
             return
-
         keys = _keys_status()
         if not keys["groq"]:
             st.error("`GROQ_API_KEY` is missing from `.env`.")
@@ -496,50 +698,17 @@ def main() -> None:
         if not keys["tavily"] and not keys["serper"] and not keys["duckduckgo"]:
             st.error("No search backend. Set Tavily/Serper or install `ddgs`.")
             return
-
         symbols = _parse_symbols(symbols_raw)
-        run_research = _get_runner()
-
-        progress = st.progress(0, text="Starting multi-agent pipeline…")
-        status = st.empty()
-        status.info(
-            "Running: researcher → filings → transcripts → fundamentals → "
-            "mf → macro → risk → synthesizer …"
-        )
-        progress.progress(15, text="Agents working (often 1–3 minutes)…")
-
-        try:
-            with st.spinner("Running multi-agent graph…"):
-                result = run_research(query, symbols, source="streamlit")
-        except Exception as e:
-            progress.empty()
-            status.empty()
-            st.error(f"Pipeline failed: {e}")
-            with st.expander("Error details"):
-                st.exception(e)
-            return
-
-        progress.progress(100, text="Done")
-        ls = result.get("langsmith") or {}
-        if ls.get("enabled"):
-            status.success(
-                f"Research note ready · LangSmith project: `{ls.get('project')}` "
-                "(open smith.langchain.com to inspect the graph)"
-            )
-        else:
-            status.success("Research note ready.")
-
-        st.session_state["last_result"] = result
-        st.session_state["last_query"] = query
-        st.session_state["last_symbols"] = symbols
-        st.session_state["show_steps"] = show_steps
-        st.session_state["show_viz"] = show_viz
+        _run_pipeline(query, symbols, show_steps, show_viz)
 
     result = st.session_state.get("last_result")
     if not result:
-        st.info(
-            "Enter a query (and ideally NSE symbols), then click "
-            "**Generate research note**. Charts use live market data."
+        _render_landing()
+        st.markdown(
+            "<div class='desk-foot'>Disclaimer: AI-generated educational demo only. "
+            "Not investment advice and not an official ICICI Prudential AMC product. "
+            "Market tape and charts use Yahoo Finance data which may be delayed or incomplete.</div>",
+            unsafe_allow_html=True,
         )
         return
 
@@ -547,39 +716,78 @@ def main() -> None:
     symbols = st.session_state.get("last_symbols") or []
     show_steps = st.session_state.get("show_steps", True)
     show_viz = st.session_state.get("show_viz", True)
+    when = st.session_state.get("last_run_at") or datetime.now().strftime("%d %b %Y")
 
-    st.divider()
-    m1, m2 = st.columns([3, 1])
-    with m1:
-        st.markdown(f"**Query:** {query}")
-    with m2:
-        st.markdown(f"**Symbols:** {', '.join(symbols) if symbols else 'none'}")
+    st.markdown(query_bar_html(query, symbols, when), unsafe_allow_html=True)
 
-    # --- Dashboard layer ---
-    if show_viz:
-        try:
-            _render_kpi_dashboard(symbols)
-            _render_charts(symbols)
-        except Exception as e:
-            st.warning(f"Visualization layer error: {e}")
-
-    st.divider()
-
-    # --- Narrative layer ---
-    st.subheader("Research note")
-    report = result.get("final_report") or "_No report generated_"
-    view = st.radio(
-        "Report layout",
-        ["Section tabs (recommended)", "Single scroll"],
-        horizontal=True,
-        label_visibility="collapsed",
+    overview, charts, note, papers, export = st.tabs(
+        ["Overview", "Charts", "Research note", "Workpapers", "Export & sources"]
     )
-    if view.startswith("Section"):
-        _render_report_structured(report)
-    else:
-        st.markdown(report)
 
-    with st.expander("Data sources", expanded=False):
+    with overview:
+        if show_viz:
+            try:
+                _render_kpi_dashboard(symbols)
+            except Exception as e:
+                st.warning(f"Visualization layer error: {e}")
+        else:
+            st.caption("Charts & KPIs were turned off for this run.")
+        report_preview = result.get("final_report") or ""
+        from pruinsight.viz_data import parse_report_sections
+
+        sections = parse_report_sections(report_preview)
+        exec_body = ""
+        for h, b in sections:
+            if "executive" in h.lower() or h.lower() in {"overview", "summary"}:
+                exec_body = b
+                break
+        if not exec_body and sections:
+            exec_body = sections[0][1]
+        if exec_body:
+            st.markdown("##### Executive snapshot")
+            st.markdown('<div class="note-body-anchor"></div>', unsafe_allow_html=True)
+            st.markdown(exec_body[:1800] + ("…" if len(exec_body) > 1800 else ""))
+
+    with charts:
+        if show_viz:
+            try:
+                _render_charts(symbols)
+            except Exception as e:
+                st.warning(f"Chart layer error: {e}")
+        else:
+            st.caption("Charts were turned off for this run.")
+
+    with note:
+        report = result.get("final_report") or "_No report generated_"
+        st.markdown(
+            note_masthead_html(
+                "Mutual-fund desk note",
+                f"{when}\nSymbols: {', '.join(symbols) if symbols else '—'}",
+            ),
+            unsafe_allow_html=True,
+        )
+        view = st.radio(
+            "Note layout",
+            ["Section tabs", "Single scroll"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        if view.startswith("Section"):
+            _render_report_structured(report)
+        else:
+            st.markdown('<div class="note-body-anchor"></div>', unsafe_allow_html=True)
+            st.markdown(report)
+
+    with papers:
+        _render_agent_intermediates(result, show_steps)
+        if not show_steps:
+            st.caption("Workpapers were turned off for this run. Re-run with the toggle on.")
+
+    with export:
+        st.markdown("##### Export this note")
+        report = result.get("final_report") or ""
+        _render_downloads(report)
+        st.markdown("##### Data sources")
         sources_md = result.get("data_sources_md")
         if not sources_md:
             from pruinsight.report_export import build_sources_section
@@ -587,16 +795,11 @@ def main() -> None:
             sources_md = build_sources_section(query, symbols)
         st.markdown(sources_md)
 
-    st.markdown("##### Export")
-    _render_downloads(report)
-
-    st.divider()
-    _render_agent_intermediates(result, show_steps)
-
-    st.caption(
-        "Disclaimer: AI-generated educational demo only. Not investment advice "
-        "and not an official ICICI Prudential AMC product. "
-        "Charts use Yahoo Finance data which may be delayed or incomplete."
+    st.markdown(
+        "<div class='desk-foot'>Disclaimer: AI-generated educational demo only. "
+        "Not investment advice and not an official ICICI Prudential AMC product. "
+        "Market tape and charts use Yahoo Finance data which may be delayed or incomplete.</div>",
+        unsafe_allow_html=True,
     )
 
 

@@ -109,6 +109,65 @@ def resolve_peer_universe(symbols: list[str]) -> list[str]:
     return out[:8]
 
 
+TAPE_TICKERS: list[tuple[str, str]] = [
+    ("NIFTY 50", "^NSEI"),
+    ("SENSEX", "^BSESN"),
+    ("INDIA VIX", "^INDIAVIX"),
+    ("USD/INR", "INR=X"),
+]
+
+
+def fetch_index_tape() -> list[dict[str, Any]]:
+    """Compact index tape for the research-desk header (one batched download)."""
+    empty = [{"label": lab, "last": None, "chg": None} for lab, _ in TAPE_TICKERS]
+    tickers = [t for _, t in TAPE_TICKERS]
+    try:
+        data = yf.download(
+            tickers,
+            period="5d",
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            threads=True,
+            progress=False,
+        )
+    except Exception:
+        return empty
+
+    if data is None or getattr(data, "empty", True):
+        return empty
+
+    out: list[dict[str, Any]] = []
+    for label, ticker in TAPE_TICKERS:
+        last = None
+        prev = None
+        try:
+            if isinstance(data.columns, pd.MultiIndex):
+                if ticker in data.columns.get_level_values(0):
+                    closes = data[ticker]["Close"].dropna()
+                else:
+                    closes = pd.Series(dtype=float)
+            else:
+                closes = data["Close"].dropna()
+            if len(closes) >= 1:
+                last = _safe_float(closes.iloc[-1])
+            if len(closes) >= 2:
+                prev = _safe_float(closes.iloc[-2])
+        except Exception:
+            last = prev = None
+        chg = ((last / prev) - 1.0) * 100.0 if last and prev else None
+        out.append({"label": label, "last": last, "chg": chg})
+    return out
+
+
+def day_change_pct(snap: dict[str, Any]) -> Optional[float]:
+    price = _safe_float(snap.get("price"))
+    prev = _safe_float(snap.get("prev_close"))
+    if price is None or prev is None or prev == 0:
+        return None
+    return ((price / prev) - 1.0) * 100.0
+
+
 def format_inr_cr(val: Optional[float]) -> str:
     if val is None:
         return "N/A"

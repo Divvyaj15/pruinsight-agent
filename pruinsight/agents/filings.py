@@ -1,8 +1,6 @@
 """Filings agent — SEBI/exchange/company PDF primary sources + RAG."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import invoke_chat
 from pruinsight.state import AgentState
 from pruinsight.tools.filings_tools import programmatic_filings_brief
 
@@ -43,16 +41,12 @@ Prior market research (context only — prefer filings when they conflict with h
 {market[:2500]}
 
 === Raw filing pipeline output ===
-{raw[:24000]}
+{raw[:6000]}
 
 Write the primary-source / filings brief now.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = get_llm(temperature=0.15).invoke(messages)
+    response = invoke_chat(SYSTEM, user_msg, role="filings")
     content = response.content if isinstance(response.content, str) else str(response.content)
 
     return {

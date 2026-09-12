@@ -1,8 +1,6 @@
 """Macro agent — RBI policy context, India market proxies, FRED/global rates."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from pruinsight.llm import get_llm
+from pruinsight.llm import invoke_chat
 from pruinsight.state import AgentState
 from pruinsight.tools.macro_tools import programmatic_macro_brief
 
@@ -41,16 +39,12 @@ Short market research context:
 {(state.get('market_research') or 'N/A')[:1200]}
 
 === Raw macro data pack ===
-{raw[:26000]}
+{raw[:6000]}
 
 Write the macro & rates brief for the MF desk now.
 """
 
-    messages = [
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=user_msg),
-    ]
-    response = get_llm(temperature=0.15).invoke(messages)
+    response = invoke_chat(SYSTEM, user_msg, role="macro")
     content = response.content if isinstance(response.content, str) else str(response.content)
     return {
         "macro_context": content,
