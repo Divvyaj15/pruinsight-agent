@@ -168,6 +168,18 @@ def _is_tpm_or_size_error(exc: BaseException) -> bool:
     )
 
 
+def _is_tool_choice_error(exc: BaseException) -> bool:
+    """Groq gpt-oss often emits a tool call even when the request has no tools."""
+    msg = str(exc)
+    return "tool_use_failed" in msg or "Tool choice is none" in msg
+
+
+_NO_TOOLS_RULE = (
+    "\n\nHard rule: you have no tools in this step. Write markdown prose only. "
+    "Do not emit function calls, JSON, or names like query_filings_rag / web_search."
+)
+
+
 def _pace_for_tokens(est_tokens: int) -> None:
     """Sleep so successive calls stay under GROQ_TPM_LIMIT (free = 8000/min)."""
     global _last_llm_finish
@@ -213,6 +225,15 @@ def get_llm(
     return _cached_chatgroq(mid, round(float(temp), 3), MAX_COMPLETION_TOKENS)
 
 
+def _fallback_brief(user: str) -> AIMessage:
+    return AIMessage(
+        content=(
+            "Provider blocked a tool call on a no-tools step. Evidence already in context:\n\n"
+            + clip_text(user, 4500)
+        )
+    )
+
+
 def invoke_chat(
     system: str,
     user: str,
@@ -223,9 +244,11 @@ def invoke_chat(
     """Invoke with clipped prompts, TPM pacing, and shrink/retry on 413."""
     budget = MAX_INPUT_CHARS
     last_exc: BaseException | None = None
-    sys = clip_text(system, 3500)
+    sys = clip_text(system, 3200) + _NO_TOOLS_RULE
+    tool_fails = 0
+    work_user = user
     for _ in range(5):
-        usr = clip_text(user, budget)
+        usr = clip_text(work_user, budget)
         messages = [SystemMessage(content=sys), HumanMessage(content=usr)]
         est = estimate_tokens_from_chars(_content_chars(sys) + _content_chars(usr)) + MAX_COMPLETION_TOKENS
         _pace_for_tokens(est)
@@ -233,10 +256,19 @@ def invoke_chat(
             resp = get_llm(temperature=temperature, role=role).invoke(messages)
             _mark_llm_finished()
             return resp  # type: ignore[return-value]
-        except Exception as exc:
+        except Exception as extra:
             _mark_llm_finished()
-            last_exc = exc
-            if not _is_tpm_or_size_error(exc):
+            last_exc = extra
+            if _is_tool_choice_error(extra):
+                tool_fails += 1
+                work_user = (
+                    f"{user}\n\nWrite the brief in prose only from the evidence above. "
+                    "Do not call tools."
+                )
+                if tool_fails >= 2:
+                    return _fallback_brief(usr)
+                continue
+            if not _is_tpm_or_size_error(extra):
                 raise
             budget = max(2400, budget // 2)
             time.sleep(12)
@@ -262,10 +294,12 @@ def invoke_messages(
             resp = client.invoke(messages)
             _mark_llm_finished()
             return resp
-        except Exception as exc:
+        except Exception as extra:
             _mark_llm_finished()
-            last_exc = exc
-            if not _is_tpm_or_size_error(exc):
+            last_exc = extra
+            if _is_tool_choice_error(extra):
+                raise
+            if not _is_tpm_or_size_error(extra):
                 raise
             time.sleep(12 + attempt * 8)
     assert last_exc is not None
