@@ -28,6 +28,25 @@ from pruinsight.ui_theme import (
 
 load_dotenv()
 
+
+def _streamlit_secrets_to_env() -> None:
+    """Streamlit Cloud stores secrets in TOML (`st.secrets`), not `.env`.
+
+    Copy them into os.environ so Groq/Tavily/LangSmith keep using getenv().
+    """
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+    for key, value in secrets.items():
+        if isinstance(value, dict):
+            for inner_key, inner_val in value.items():
+                if inner_val is not None and str(inner_val).strip() != "":
+                    os.environ[str(inner_key)] = str(inner_val)
+        elif value is not None and str(value).strip() != "":
+            os.environ[str(key)] = str(value)
+
+
 st.set_page_config(
     page_title="PruInsight · Research Desk",
     page_icon="◈",
@@ -39,6 +58,8 @@ st.set_page_config(
         "About": "PruInsight — multi-agent equity research desk. Educational demo only.",
     },
 )
+
+_streamlit_secrets_to_env()
 
 st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 
